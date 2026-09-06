@@ -5,13 +5,6 @@ import Html.Attributes exposing (class)
 import Json.Decode as Decode
 
 
-
--- Decodes the tree produced by the Rust `highlight_typst` command, which
--- mirrors `typst_syntax::highlight::highlight_html`'s own recursion exactly
--- (real parser output, not a regex guess) — tags can nest (e.g. `Strong`
--- inside `Heading`), so this is a tree, not a flat token list.
-
-
 type Node
     = Leaf (Maybe String) String
     | Branch (Maybe String) (List Node)

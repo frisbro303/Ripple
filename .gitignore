@@ -18,6 +18,9 @@ dist
 dist-ssr
 *.local
 
+# Tauri mobile scaffolding — regenerated via `tauri ios init` / `tauri android init`
+src-tauri/gen
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

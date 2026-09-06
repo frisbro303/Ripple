@@ -49,6 +49,7 @@ sessionCleared =
 type SyncStatus
     = NoStatusChange
     | SyncFailed String
+    | SessionExpired
     | SyncSucceeded
 
 
@@ -83,13 +84,13 @@ update session msg model =
                     ( model, Cmd.none, NoStatusChange )
 
         GotRemoteOps (Err error) ->
-            ( model, Cmd.none, SyncFailed (describeHttpError error) )
+            ( model, Cmd.none, classifyError error )
 
         GotPushResult (Ok ()) ->
             ( model, Cmd.none, SyncSucceeded )
 
         GotPushResult (Err error) ->
-            ( model, Cmd.none, SyncFailed (describeHttpError error) )
+            ( model, Cmd.none, classifyError error )
 
         ImportedOps importedOps ->
             let
@@ -97,6 +98,23 @@ update session msg model =
                     OpsLog.diff importedOps model
             in
             ( OpsLog.merge importedOps model, Db.insertOps toInsert, NoStatusChange )
+
+
+{-| A 401 means the access token itself was rejected — most likely it's
+expired mid-session (Supabase's JWTs are short-lived, and until now nothing
+ever refreshed it after the one-time refresh at app launch). Surfacing this
+distinctly from a generic `SyncFailed` lets the caller kick off a token
+refresh instead of just sitting on a permanently-red sync indicator that
+never recovers even once the network (or the real problem) is back.
+-}
+classifyError : Http.Error -> SyncStatus
+classifyError error =
+    case error of
+        Http.BadStatus 401 ->
+            SessionExpired
+
+        _ ->
+            SyncFailed (describeHttpError error)
 
 
 describeHttpError : Http.Error -> String

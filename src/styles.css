@@ -55,11 +55,23 @@ button {
 button {
   position: relative;
   cursor: pointer;
+  /* WebKit's default gray flash/highlight on tap (and its lingering focus
+     ring after release) — not something we draw, but needs to be
+     explicitly killed or it shows as a stray bar/box under whichever
+     button was last tapped, following focus around on touch devices. */
+  -webkit-tap-highlight-color: transparent;
+  /* Without resetting appearance, `<button>` keeps WebKit's native control
+     rendering layer active underneath our own background/border/outline
+     overrides — on iOS that can include a persistent native focus/pressed
+     indicator those overrides don't actually suppress. */
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 input,
 textarea,
-button {
+button,
+select {
   outline: none;
 }
 
@@ -329,7 +341,7 @@ button:focus-visible .btn-hint {
 
 .review-card-area {
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   margin: 2rem auto 0;
   display: flex;
   flex-direction: column;
@@ -365,10 +377,14 @@ button:focus-visible .btn-hint {
   }
 }
 
-.editable-typst-edit,
 .review-box img,
 .review-box .note-editor-error {
   animation: editable-typst-fade-in 0.16s ease;
+}
+
+.review-box img {
+  max-width: 100%;
+  height: auto;
 }
 
 .review-box:hover {
@@ -381,6 +397,29 @@ button:focus-visible .btn-hint {
   background: var(--hover-bg);
   padding: 0.35rem 0 0;
   overflow: hidden;
+}
+
+/* The editor and preview layers are both always mounted (see the comment
+   on EditableTypst.view for why) — only one is ever shown at a time. */
+.editable-typst-edit {
+  display: none;
+  width: 100%;
+}
+
+.review-box--editing .editable-typst-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+  animation: editable-typst-fade-in 0.16s ease;
+}
+
+.editable-typst-preview-layer {
+  display: contents;
+}
+
+.review-box--editing .editable-typst-preview-layer {
+  display: none;
 }
 
 .editable-typst-hint {
@@ -424,7 +463,7 @@ button:focus-visible .btn-hint {
   bottom: 0;
   display: flex;
   justify-content: center;
-  max-width: 560px;
+  max-width: 600px;
   margin: 0 auto;
   padding: 0 1.25rem 1.25rem;
 }
@@ -437,13 +476,6 @@ button:focus-visible .btn-hint {
   width: 100%;
 }
 
-.editable-typst-edit {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  text-align: left;
-}
 
 .note-editor-field-wrap {
   position: relative;
@@ -593,7 +625,7 @@ button:focus-visible .btn-hint {
 .review-stage {
   position: relative;
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -743,7 +775,7 @@ button:focus-visible .btn-hint {
   flex-direction: column;
   gap: 1rem;
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   margin: 0 auto;
   min-height: 100%;
 }
@@ -794,7 +826,7 @@ button:focus-visible .btn-hint {
   flex-direction: column;
   gap: 0.5rem;
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   margin: 2rem auto 0;
 }
 
@@ -906,6 +938,10 @@ button:focus-visible .btn-hint {
   background-color: var(--easy);
 }
 
+.forecast-bar {
+  fill: var(--accent);
+}
+
 .retention-empty {
   fill: var(--border);
 }
@@ -965,7 +1001,7 @@ button:focus-visible .btn-hint {
 .settings-support-bar {
   flex-shrink: 0;
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   margin: 0 auto;
   padding: 0.75rem 2rem;
   border-top: 1px solid var(--border);
@@ -995,7 +1031,7 @@ button:focus-visible .btn-hint {
 
 .account-page {
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   margin: 2rem auto 0;
   display: flex;
   flex-direction: column;
@@ -1076,5 +1112,102 @@ button:focus-visible .btn-hint {
 
     color: var(--ink);
     background-color: var(--bg);
+  }
+}
+
+/* Touch-primary devices (iOS) use a coarse pointer, unlike a trackpad or
+   mouse — a reliable, platform-agnostic way to tell "this is a phone/tablet"
+   apart from "this is a desktop window", without any Rust/JS platform
+   detection. Same page-bar markup and icon styling, just relocated to the
+   bottom tab-bar position that's conventional there, and clear of the
+   macOS-only traffic-light reservation and window-drag region.
+
+   This block is deliberately placed at the very end of the file: several
+   overrides in here share exact selector specificity with earlier base
+   rules (e.g. `.page-content`, `.page-icon`), and for tied specificity
+   CSS resolves by source order — later wins — regardless of whether a
+   media query is active. Putting overrides earlier in the file cost us
+   real time more than once (the tab-bar tooltip fix, then this same
+   margin fix) before that was understood; keep new coarse-pointer rules
+   appended here, not interleaved with the desktop rules above. */
+@media (pointer: coarse) {
+  /* The tab-bar tooltip renders as a stray dark bar near the bottom of
+     the screen on touch devices (several conditional variants tied to
+     :hover/:focus-visible were each unreliable in some situation on
+     WKWebView/iOS). Hiding it unconditionally sidesteps whatever
+     pseudo-class WebKit does or doesn't apply on tap — there's no
+     hover-preview value to a tooltip on touch anyway, since you've
+     already committed to the tap by the time it would show. */
+  .page-bar .tooltip {
+    visibility: hidden !important;
+  }
+
+  .app {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .page-bar {
+    order: 3;
+    justify-content: space-around;
+    height: 58px;
+    padding-left: 0.5rem;
+    border-bottom: none;
+    border-top: 1px solid var(--border);
+    -webkit-app-region: none;
+  }
+
+  /* Apple HIG's minimum touch target is 44x44pt — the desktop icon buttons
+     are sized for a mouse pointer's precision and fall well short of that,
+     so grow the tappable area (not the icon itself) on touch devices. */
+  .page-icon {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.6rem;
+  }
+
+  /* The sync-status dot is positioned relative to the button's own edge,
+     not the icon glyph — fine on desktop where the button is barely
+     bigger than the icon, but the larger touch-target padding above
+     leaves it floating away from the person icon instead of tucked
+     against its corner. Push it in by roughly the added padding. */
+  .page-icon-dot {
+    top: 0.65rem;
+    right: 0.65rem;
+  }
+
+  .page-content {
+    order: 1;
+    padding: 1rem 1.25rem;
+  }
+
+  .settings-support-bar {
+    order: 2;
+    padding: 0.75rem 1.25rem;
+  }
+
+  .review-fixed-bottom {
+    bottom: 58px;
+  }
+
+  /* Safari/WKWebView auto-zooms the whole page on focus for any text input
+     whose font-size computes under 16px — an iOS accessibility heuristic,
+     not something toggleable via a meta tag without also disabling
+     legitimate pinch-zoom. Several inputs (auth fields, the note/preamble
+     editor) sit under that threshold at their normal desktop sizes, so
+     force 16px here specifically rather than bumping desktop typography. */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Keyboard-shortcut hints (front/back edit shortcuts, rating-key numbers)
+     are meaningless on a device with no physical keyboard, and — like the
+     tab-bar tooltip above — WebKit's touch-as-focus-visible quirk can make
+     :focus-visible-triggered ones (`.btn-hint`) stick around after a tap
+     instead of only ever appearing on real hover. Hide both unconditionally. */
+  .editable-typst-hint,
+  .btn-hint {
+    visibility: hidden !important;
   }
 }

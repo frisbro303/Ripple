@@ -36,6 +36,8 @@ type OpKind
         { id : CardId
         , rating : Rating
         }
+    | ResetToLearning CardId
+    | DeferCard { id : CardId, days : Int }
     | SetPreamble String
     | SetRetention Int
     | AddImage { id : String, data : String }
@@ -85,6 +87,15 @@ opKindDecoder =
 
                     "DeleteCard" ->
                         Decode.map DeleteCard (Decode.field "id" uuidDecoder)
+
+                    "ResetToLearning" ->
+                        Decode.map ResetToLearning (Decode.field "id" uuidDecoder)
+
+                    "DeferCard" ->
+                        Decode.map2
+                            (\id days -> DeferCard { id = id, days = days })
+                            (Decode.field "id" uuidDecoder)
+                            (Decode.field "days" Decode.int)
 
                     "ReviewCard" ->
                         Decode.map2
@@ -168,6 +179,19 @@ opKindEncoder opKind =
             Encode.object
                 [ ( "kind", Encode.string "DeleteCard" )
                 , ( "id", uuidEncoder id )
+                ]
+
+        ResetToLearning id ->
+            Encode.object
+                [ ( "kind", Encode.string "ResetToLearning" )
+                , ( "id", uuidEncoder id )
+                ]
+
+        DeferCard { id, days } ->
+            Encode.object
+                [ ( "kind", Encode.string "DeferCard" )
+                , ( "id", uuidEncoder id )
+                , ( "days", Encode.int days )
                 ]
 
         ReviewCard { id, rating } ->

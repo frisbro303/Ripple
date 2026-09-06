@@ -94,6 +94,10 @@ pub const DEFAULT_WIDTH_PT: f64 = 340.157480315;
 const MIN_WIDTH_PT: f64 = 100.0;
 const MAX_WIDTH_PT: f64 = 900.0;
 
+pub const DEFAULT_TEXT_SIZE_PT: f64 = 14.0;
+const MIN_TEXT_SIZE_PT: f64 = 8.0;
+const MAX_TEXT_SIZE_PT: f64 = 32.0;
+
 fn sanitize_ink(ink: &str) -> &str {
     let hex = ink.strip_prefix('#').unwrap_or(ink);
     let valid = (hex.len() == 3 || hex.len() == 6) && hex.bytes().all(|b| b.is_ascii_hexdigit());
@@ -104,20 +108,26 @@ fn sanitize_ink(ink: &str) -> &str {
     }
 }
 
-fn card_preamble(width_pt: f64, ink: &str) -> String {
+fn card_preamble(width_pt: f64, text_size_pt: f64, ink: &str) -> String {
     let width_pt = if width_pt.is_finite() {
         width_pt.clamp(MIN_WIDTH_PT, MAX_WIDTH_PT)
     } else {
         DEFAULT_WIDTH_PT
     };
+    let text_size_pt = if text_size_pt.is_finite() {
+        text_size_pt.clamp(MIN_TEXT_SIZE_PT, MAX_TEXT_SIZE_PT)
+    } else {
+        DEFAULT_TEXT_SIZE_PT
+    };
     let ink = sanitize_ink(ink);
     format!(
-        "#set page(width: {width_pt}pt, height: auto, margin: (rest: 0.1cm, bottom: 0.4cm), fill: none)\n#set text(size: 14pt, fill: rgb(\"{ink}\"))\n"
+        "#set page(width: {width_pt}pt, height: auto, margin: (rest: 0.1cm, bottom: 0.4cm), fill: none)\n#set text(size: {text_size_pt}pt, fill: rgb(\"{ink}\"))\n"
     )
 }
 
 pub struct RenderOptions<'a> {
     pub width_pt: f64,
+    pub text_size_pt: f64,
     pub preamble: &'a str,
     pub attachments: &'a [(String, Vec<u8>)],
     pub ink: &'a str,
@@ -127,6 +137,7 @@ impl Default for RenderOptions<'_> {
     fn default() -> Self {
         Self {
             width_pt: DEFAULT_WIDTH_PT,
+            text_size_pt: DEFAULT_TEXT_SIZE_PT,
             preamble: "",
             attachments: &[],
             ink: "black",
@@ -137,7 +148,7 @@ impl Default for RenderOptions<'_> {
 pub fn render_as_svg(text: &str, options: RenderOptions) -> Result<String, String> {
     let source = format!(
         "{}{}{text}",
-        card_preamble(options.width_pt, options.ink),
+        card_preamble(options.width_pt, options.text_size_pt, options.ink),
         options.preamble
     );
     let world = SimpleWorld::new(&source, options.attachments);

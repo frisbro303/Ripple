@@ -17,11 +17,13 @@ import Time
 
 
 
--- "Learning" here covers reviewed cards whose current scheduled interval is
--- under a day (which includes, but isn't limited to, cards actually cycling
--- through `Sea.Learning`'s short-term steps). Not mutually exclusive with
--- "due" or "new": a new card can be due the moment it's created, and a
--- learning-step card can be both new and due at once.
+-- "New" means never introduced — no review has ever been submitted for the
+-- card. "Learning" means it's been introduced (at least one review) but
+-- hasn't graduated out of `Sea.Learning`'s short-term steps into FSRS-6
+-- scheduling yet. Both are `FSRS.isNew`; the ops log is what tells them
+-- apart, since a card's own state doesn't otherwise distinguish "never
+-- touched" from "reset to step 0 by an Again". Neither is mutually
+-- exclusive with "due": a fresh new card is due the moment it's created.
 
 
 type alias Summary =
@@ -34,20 +36,33 @@ type alias Summary =
     }
 
 
-summarize : Time.Posix -> OpsLog -> Sea -> Summary
-summarize now opsLog sea =
+summarize : Int -> Time.Posix -> OpsLog -> Sea -> Summary
+summarize dailyNewLimit now opsLog sea =
     let
         cards =
             Sea.toList sea
 
-        ( newCards, reviewedCards ) =
+        ( notYetGraduated, reviewedCards ) =
             List.partition (\card -> FSRS.isNew card.fsrs) cards
 
-        dueCards =
-            List.filter (\card -> Time.posixToMillis card.fsrs.due <= Time.posixToMillis now) cards
+        introduced =
+            Sea.introducedCardIds opsLog
 
-        learningCards =
-            List.filter (\card -> FSRS.elapsedDays card.fsrs.lastReview card.fsrs.due < 1) reviewedCards
+        ( learningCards, newCards ) =
+            List.partition (Sea.isIntroduced introduced) notYetGraduated
+
+        -- Matches `Sea.nextDue`'s gating exactly: the daily limit only caps
+        -- *introducing* new cards, not how many times an already-introduced
+        -- (but not yet graduated) card is allowed to reappear — so counting
+        -- every technically-"due" card here regardless made this number
+        -- disagree with what Review actually shows.
+        allowNewIntroductions =
+            Sea.newCardsToday now opsLog < dailyNewLimit
+
+        dueCards =
+            cards
+                |> List.filter (\card -> Time.posixToMillis card.fsrs.due <= Time.posixToMillis now)
+                |> List.filter (\card -> allowNewIntroductions || Sea.isIntroduced introduced card)
 
         retainedPercent =
             case reviewedCards of
@@ -206,6 +221,59 @@ history now days opsLog =
             )
 
 
+-- How many introduced (learning or graduated) cards will become due on each
+-- of the next `days` calendar days — a forward-looking counterpart to the
+-- review-history chart above. Cards that have never been introduced are
+-- excluded: an un-introduced new card's `fsrs.due` is just its creation
+-- time, not a real forecasted review date, so counting it here would just
+-- dump every new card into "today" regardless of the daily new-card limit.
+-- Anything already overdue (due in the past) is folded into today's count,
+-- same as Anki's forecast does, rather than silently dropped.
+
+
+type alias ForecastDay =
+    { date : Date, count : Int }
+
+
+type alias Forecast =
+    List ForecastDay
+
+
+forecast : Int -> Time.Posix -> OpsLog -> Sea -> Forecast
+forecast days now opsLog sea =
+    let
+        clampedDays =
+            clamp 1 730 days
+
+        today =
+            FSRS.dateOf now
+
+        todayNum =
+            Date.toRataDie today
+
+        introduced =
+            Sea.introducedCardIds opsLog
+
+        byDay : Dict Int Int
+        byDay =
+            Sea.toList sea
+                |> List.filter (Sea.isIntroduced introduced)
+                |> List.map (\card -> max todayNum (Date.toRataDie (FSRS.dateOf card.fsrs.due)))
+                |> List.foldl (\day acc -> Dict.update day (Maybe.withDefault 0 >> (+) 1 >> Just) acc) Dict.empty
+    in
+    List.range 0 (clampedDays - 1)
+        |> List.map
+            (\offset ->
+                let
+                    day =
+                        Date.add Date.Days offset today
+                in
+                { date = day
+                , count = Dict.get (Date.toRataDie day) byDay |> Maybe.withDefault 0
+                }
+            )
+
+
 type alias RatingTotals =
     { again : Int, hard : Int, good : Int, easy : Int, total : Int }
 
@@ -240,11 +308,18 @@ type alias LoadedState =
     { summary : Summary
     , historyDays : Int
     , history : History
+    , forecastDays : Int
+    , forecast : Forecast
     }
 
 
 defaultHistoryDays : Int
 defaultHistoryDays =
+    30
+
+
+defaultForecastDays : Int
+defaultForecastDays =
     30
 
 
@@ -262,16 +337,20 @@ type Msg
     = GotTimeForSummary Time.Posix
     | HistoryDaysChanged Int
     | GotTimeForHistory Int Time.Posix
+    | ForecastDaysChanged Int
+    | GotTimeForForecast Int Time.Posix
 
 
-update : OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg )
-update opsLog sea msg model =
+update : Int -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg )
+update dailyNewLimit opsLog sea msg model =
     case msg of
         GotTimeForSummary now ->
             ( Loaded
-                { summary = summarize now opsLog sea
+                { summary = summarize dailyNewLimit now opsLog sea
                 , historyDays = defaultHistoryDays
                 , history = history now defaultHistoryDays opsLog
+                , forecastDays = defaultForecastDays
+                , forecast = forecast defaultForecastDays now opsLog sea
                 }
             , Cmd.none
             )
@@ -283,6 +362,17 @@ update opsLog sea msg model =
             case model of
                 Loaded state ->
                     ( Loaded { state | historyDays = days, history = history now days opsLog }, Cmd.none )
+
+                Loading ->
+                    ( model, Cmd.none )
+
+        ForecastDaysChanged days ->
+            ( model, Task.perform (GotTimeForForecast days) Time.now )
+
+        GotTimeForForecast days now ->
+            case model of
+                Loaded state ->
+                    ( Loaded { state | forecastDays = days, forecast = forecast days now opsLog sea }, Cmd.none )
 
                 Loading ->
                     ( model, Cmd.none )
@@ -317,6 +407,12 @@ view model =
                     [ viewHistoryChart state.history
                     , viewHistoryLegend
                     ]
+                , div [ class "history-heading-row" ]
+                    [ h3 [ class "history-heading" ] [ text "Forecast" ]
+                    , viewForecastDaysSelect state.forecastDays
+                    ]
+                , div [ class "history-card" ]
+                    [ viewForecastChart state.forecast ]
                 , h3 [ class "history-heading retention-heading" ] [ text "Retention" ]
                 , div [ class "history-card" ]
                     [ div [ class "retention-row" ]
@@ -388,6 +484,40 @@ daysLabel days =
 
         _ ->
             String.fromInt days ++ " days"
+
+
+viewForecastDaysSelect : Int -> Html Msg
+viewForecastDaysSelect selectedDays =
+    select
+        [ class "link-select"
+        , onInput (String.toInt >> Maybe.withDefault selectedDays >> ForecastDaysChanged)
+        ]
+        (List.map (forecastDaysOption selectedDays) [ 7, 30, 90, 365 ])
+
+
+forecastDaysOption : Int -> Int -> Html Msg
+forecastDaysOption selectedDays days =
+    option [ value (String.fromInt days), selected (days == selectedDays) ]
+        [ text (forecastDaysLabel days) ]
+
+
+forecastDaysLabel : Int -> String
+forecastDaysLabel days =
+    case days of
+        7 ->
+            "Next 7 days"
+
+        30 ->
+            "Next 30 days"
+
+        90 ->
+            "Next 90 days"
+
+        365 ->
+            "Next year"
+
+        _ ->
+            "Next " ++ String.fromInt days ++ " days"
 
 
 
@@ -516,6 +646,102 @@ viewHistoryLegend =
         )
 
 
+viewForecastChart : Forecast -> Html msg
+viewForecastChart fc =
+    let
+        chartWidth =
+            600
+
+        chartHeight =
+            140
+
+        plotHeight =
+            chartHeight - 16
+
+        n =
+            List.length fc
+
+        slot =
+            chartWidth / toFloat (max 1 n)
+
+        barGap =
+            min 2 (slot * 0.2)
+
+        barWidth =
+            max 0.5 (slot - barGap)
+
+        maxCount =
+            fc
+                |> List.map .count
+                |> List.maximum
+                |> Maybe.withDefault 0
+                |> max 1
+                |> toFloat
+
+        labelEvery =
+            max 1 (ceiling (toFloat n / 6))
+
+        barFor i day =
+            if day.count == 0 then
+                Nothing
+
+            else
+                let
+                    x =
+                        toFloat i * (barWidth + barGap)
+
+                    barHeight =
+                        (toFloat day.count / maxCount) * plotHeight
+                in
+                Just
+                    (Svg.rect
+                        [ SA.class "forecast-bar"
+                        , SA.x (numAttr x)
+                        , SA.y (numAttr (plotHeight - barHeight))
+                        , SA.width (numAttr barWidth)
+                        , SA.height (numAttr barHeight)
+                        ]
+                        [ Svg.title []
+                            [ text
+                                (formatMonthDay day.date
+                                    ++ ": "
+                                    ++ String.fromInt day.count
+                                    ++ (if day.count == 1 then
+                                            " card due"
+
+                                        else
+                                            " cards due"
+                                       )
+                                )
+                            ]
+                        ]
+                    )
+
+        bars =
+            List.indexedMap barFor fc |> List.filterMap identity
+
+        labels =
+            fc
+                |> List.indexedMap Tuple.pair
+                |> List.filter (\( i, _ ) -> modBy labelEvery i == 0)
+                |> List.map
+                    (\( i, day ) ->
+                        Svg.text_
+                            [ SA.class "hist-axis-label"
+                            , SA.x (numAttr (toFloat i * (barWidth + barGap) + barWidth / 2))
+                            , SA.y (numAttr (chartHeight - 3))
+                            , SA.textAnchor "middle"
+                            ]
+                            [ text (formatMonthDay day.date) ]
+                    )
+    in
+    Svg.svg
+        [ SA.class "history-chart"
+        , SA.viewBox ("0 0 " ++ numAttr chartWidth ++ " " ++ numAttr chartHeight)
+        ]
+        (bars ++ labels)
+
+
 viewRetentionDonut : RatingTotals -> Html msg
 viewRetentionDonut totals =
     let
@@ -636,7 +862,7 @@ pieWedgePath cx cy r startAngle endAngle =
 
 formatMonthDay : Date -> String
 formatMonthDay date =
-    padInt (Date.monthNumber date) ++ "/" ++ padInt (Date.day date)
+    padInt (Date.day date) ++ "/" ++ padInt (Date.monthNumber date)
 
 
 padInt : Int -> String

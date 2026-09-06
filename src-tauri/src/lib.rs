@@ -13,6 +13,8 @@ fn render_typst(
     ink: &str,
     preamble: &str,
     images: Vec<(String, String)>,
+    width_pt: f64,
+    text_size_pt: f64,
 ) -> (u32, String) {
     use base64::Engine;
 
@@ -32,6 +34,8 @@ fn render_typst(
             ink,
             preamble,
             attachments: &attachments,
+            width_pt,
+            text_size_pt,
             ..RenderOptions::default()
         },
     ) {

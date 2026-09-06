@@ -1,4 +1,4 @@
-module Settings exposing (Model, Msg, SyncUpdate(..), applySyncedPreamble, applySyncedRetention, dailyNewLimit, decodeFromStore, default, desiredRetention, request, subscriptions, typstPreamble, update, view)
+module Settings exposing (Model, Msg, SyncUpdate(..), applySyncedPreamble, applySyncedRetention, dailyNewLimit, decodeFromStore, default, deferDays, desiredRetention, request, subscriptions, typstPreamble, update, view)
 
 import Browser.Events
 import Html exposing (Html, div, h3, label, option, select, text, textarea)
@@ -15,7 +15,11 @@ import Typst.Port as Port
 
 type alias Model =
     { retentionPercent : Int
+    , retentionInput : String
     , dailyNewLimit : Int
+    , dailyNewLimitInput : String
+    , deferDays : Int
+    , deferDaysInput : String
     , typstPreamble : String
     , theme : Theme
     , highlightTree : Maybe Highlight.Node
@@ -49,7 +53,11 @@ maxFieldHeight =
 default : Model
 default =
     { retentionPercent = 90
+    , retentionInput = "90"
     , dailyNewLimit = 20
+    , dailyNewLimitInput = "20"
+    , deferDays = 2
+    , deferDaysInput = "2"
     , typstPreamble = ""
     , theme = Theme.System
     , highlightTree = Nothing
@@ -74,6 +82,11 @@ dailyNewLimit model =
     model.dailyNewLimit
 
 
+deferDays : Model -> Int
+deferDays model =
+    model.deferDays
+
+
 key : String
 key =
     "settings"
@@ -84,6 +97,7 @@ encoder model =
     Encode.object
         [ ( "retentionPercent", Encode.int model.retentionPercent )
         , ( "dailyNewLimit", Encode.int model.dailyNewLimit )
+        , ( "deferDays", Encode.int model.deferDays )
         , ( "typstPreamble", Encode.string model.typstPreamble )
         , ( "theme", Encode.string (Theme.toString model.theme) )
         ]
@@ -92,6 +106,7 @@ encoder model =
 type alias StoredFields =
     { retentionPercent : Maybe Int
     , dailyNewLimit : Maybe Int
+    , deferDays : Maybe Int
     , typstPreamble : Maybe String
     , theme : Maybe String
     }
@@ -99,9 +114,10 @@ type alias StoredFields =
 
 decoder : Decode.Decoder StoredFields
 decoder =
-    Decode.map4 StoredFields
+    Decode.map5 StoredFields
         (Decode.maybe (Decode.field "retentionPercent" Decode.int))
         (Decode.maybe (Decode.field "dailyNewLimit" Decode.int))
+        (Decode.maybe (Decode.field "deferDays" Decode.int))
         (Decode.maybe (Decode.field "typstPreamble" Decode.string))
         (Decode.maybe (Decode.field "theme" Decode.string))
 
@@ -114,10 +130,23 @@ decodeFromStore loadedKey val =
             |> Maybe.map
                 (\fields ->
                     let
+                        retentionPercent =
+                            Maybe.withDefault default.retentionPercent fields.retentionPercent
+
+                        dailyNewLimitValue =
+                            Maybe.withDefault default.dailyNewLimit fields.dailyNewLimit
+
+                        deferDaysValue =
+                            Maybe.withDefault default.deferDays fields.deferDays
+
                         model =
                             { default
-                                | retentionPercent = Maybe.withDefault default.retentionPercent fields.retentionPercent
-                                , dailyNewLimit = Maybe.withDefault default.dailyNewLimit fields.dailyNewLimit
+                                | retentionPercent = retentionPercent
+                                , retentionInput = String.fromInt retentionPercent
+                                , dailyNewLimit = dailyNewLimitValue
+                                , dailyNewLimitInput = String.fromInt dailyNewLimitValue
+                                , deferDays = deferDaysValue
+                                , deferDaysInput = String.fromInt deferDaysValue
                                 , typstPreamble = Maybe.withDefault default.typstPreamble fields.typstPreamble
                                 , theme = fields.theme |> Maybe.map Theme.fromString |> Maybe.withDefault default.theme
                             }
@@ -153,6 +182,9 @@ type Msg
     = RetentionChanged String
     | RetentionBlurred
     | DailyNewLimitChanged String
+    | DailyNewLimitBlurred
+    | DeferDaysChanged String
+    | DeferDaysBlurred
     | ThemeChanged String
     | PreambleChanged String
     | PreambleBlurred
@@ -173,31 +205,57 @@ update : Msg -> Model -> ( Model, Cmd Msg, SyncUpdate )
 update msg model =
     case msg of
         RetentionChanged raw ->
-            case String.toInt raw of
-                Just percent ->
-                    let
-                        newModel =
-                            { model | retentionPercent = clamp 50 99 percent }
-                    in
-                    ( newModel, save newModel, NoSyncUpdate )
-
-                Nothing ->
-                    ( model, Cmd.none, NoSyncUpdate )
+            -- Deliberately not parsed/clamped here — doing that on every
+            -- keystroke fought the user mid-typing (e.g. typing "75" would
+            -- clamp the leading "7" to 50 before the second digit landed),
+            -- and rejecting unparseable input (like a momentarily empty
+            -- field) left the displayed value stuck out of sync with the
+            -- model, since an unchanged model produces no DOM patch. The
+            -- raw text is only parsed and clamped on blur, once the user's
+            -- done typing.
+            ( { model | retentionInput = raw }, Cmd.none, NoSyncUpdate )
 
         RetentionBlurred ->
-            ( model, Cmd.none, RetentionCommitted model.retentionPercent )
+            let
+                percent =
+                    String.toInt model.retentionInput
+                        |> Maybe.map (clamp 50 99)
+                        |> Maybe.withDefault model.retentionPercent
+
+                newModel =
+                    { model | retentionPercent = percent, retentionInput = String.fromInt percent }
+            in
+            ( newModel, save newModel, RetentionCommitted percent )
 
         DailyNewLimitChanged raw ->
-            case String.toInt raw of
-                Just n ->
-                    let
-                        newModel =
-                            { model | dailyNewLimit = clamp 0 500 n }
-                    in
-                    ( newModel, save newModel, NoSyncUpdate )
+            ( { model | dailyNewLimitInput = raw }, Cmd.none, NoSyncUpdate )
 
-                Nothing ->
-                    ( model, Cmd.none, NoSyncUpdate )
+        DailyNewLimitBlurred ->
+            let
+                n =
+                    String.toInt model.dailyNewLimitInput
+                        |> Maybe.map (clamp 0 500)
+                        |> Maybe.withDefault model.dailyNewLimit
+
+                newModel =
+                    { model | dailyNewLimit = n, dailyNewLimitInput = String.fromInt n }
+            in
+            ( newModel, save newModel, NoSyncUpdate )
+
+        DeferDaysChanged raw ->
+            ( { model | deferDaysInput = raw }, Cmd.none, NoSyncUpdate )
+
+        DeferDaysBlurred ->
+            let
+                n =
+                    String.toInt model.deferDaysInput
+                        |> Maybe.map (clamp 1 60)
+                        |> Maybe.withDefault model.deferDays
+
+                newModel =
+                    { model | deferDays = n, deferDaysInput = String.fromInt n }
+            in
+            ( newModel, save newModel, NoSyncUpdate )
 
         ThemeChanged raw ->
             let
@@ -256,7 +314,7 @@ applySyncedRetention : Int -> Model -> ( Model, Cmd Msg )
 applySyncedRetention retentionPercent model =
     let
         newModel =
-            { model | retentionPercent = retentionPercent }
+            { model | retentionPercent = retentionPercent, retentionInput = String.fromInt retentionPercent }
     in
     ( newModel, save newModel )
 
@@ -289,7 +347,7 @@ view model =
                     , type_ "number"
                     , Attr.min "50"
                     , Attr.max "99"
-                    , value (String.fromInt model.retentionPercent)
+                    , value model.retentionInput
                     , onInput RetentionChanged
                     , onBlur RetentionBlurred
                     ]
@@ -303,8 +361,23 @@ view model =
                     , type_ "number"
                     , Attr.min "0"
                     , Attr.max "500"
-                    , value (String.fromInt model.dailyNewLimit)
+                    , value model.dailyNewLimitInput
                     , onInput DailyNewLimitChanged
+                    , onBlur DailyNewLimitBlurred
+                    ]
+                    []
+                ]
+            , div [ class "settings-field" ]
+                [ label [ for "settings-defer-days" ] [ text "Defer by (days)" ]
+                , Html.input
+                    [ id "settings-defer-days"
+                    , class "auth-input"
+                    , type_ "number"
+                    , Attr.min "1"
+                    , Attr.max "60"
+                    , value model.deferDaysInput
+                    , onInput DeferDaysChanged
+                    , onBlur DeferDaysBlurred
                     ]
                     []
                 ]

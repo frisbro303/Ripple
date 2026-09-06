@@ -4,17 +4,11 @@ import Browser.Events
 import Dict exposing (Dict)
 import Html exposing (Html, div, img, span, text, textarea)
 import Html.Attributes exposing (attribute, class, classList, id, placeholder, spellcheck, src, style, value)
-import Html.Events exposing (on, onBlur, onClick, onInput, preventDefaultOn)
+import Html.Events exposing (on, onBlur, onClick, onFocus, onInput, preventDefaultOn)
 import Json.Decode as Decode
 import Typst.Highlight as Highlight
 import Typst.Port as Port
 import Url
-
-
-
--- Shows the last committed render by default; clicking (or having nothing
--- committed yet) switches to a textarea with a live preview of the draft
--- below it. Blurring the textarea commits the draft.
 
 
 type alias Model =
@@ -77,11 +71,6 @@ init id fieldPlaceholder shortcutHint preamble knownImages =
     }
 
 
-
--- For an already-existing card (e.g. loaded for review): opens showing the
--- committed source's compiled preview rather than an empty edit box.
-
-
 initWithSource : String -> String -> String -> String -> Dict String String -> String -> ( Model, Cmd Msg )
 initWithSource id fieldPlaceholder shortcutHint preamble knownImages existingSource =
     ( { id = id
@@ -119,11 +108,6 @@ isEditing model =
 isBlank : Model -> Bool
 isBlank model =
     String.trim (currentSource model) == ""
-
-
-
--- Whatever the user has actually typed, even if it hasn't been committed
--- (blurred) yet — submitting shouldn't depend on blur having already fired.
 
 
 currentSource : Model -> String
@@ -200,8 +184,6 @@ update msg model =
     case msg of
         EditStarted ->
             if isEditing model then
-                -- Already editing (e.g. clicking inside the textarea to
-                -- place the cursor) — don't clobber the in-progress draft.
                 ( model, Cmd.none, NoOutMsg )
 
             else
@@ -351,6 +333,18 @@ imageEventDecoder =
         (Decode.at [ "detail", "data" ] Decode.string)
 
 
+{-| The editing subtree (the textarea in particular) stays mounted in the
+DOM at all times, rather than being conditionally created only once
+`isEditing` flips — visibility toggles via the `review-box--editing` class
+instead. This matters specifically for iOS: focusing a textarea only
+raises the on-screen keyboard when `.focus()` runs synchronously within the
+original tap's call stack. Elm's own re-render (which would otherwise be
+what creates the textarea in the first place) is scheduled on the next
+animation frame, not synchronously — so by the time a not-yet-existing
+element could be found and focused, the tap's "user activation" window has
+already closed and WebKit silently declines to show the keyboard. Keeping
+the node around means focusing it never has to wait on a render.
+-}
 view : Model -> Html Msg
 view model =
     div
@@ -358,60 +352,58 @@ view model =
         , classList [ ( "review-box--editing", isEditing model ) ]
         , onClick EditStarted
         ]
-        (if isEditing model then
-            [ div [ class "editable-typst-edit" ]
-                (div
-                    [ class "note-editor-field-wrap"
-                    , style "height" (String.fromFloat model.fieldHeight ++ "px")
+        [ div [ class "editable-typst-edit" ]
+            (div
+                [ class "note-editor-field-wrap"
+                , style "height" (String.fromFloat model.fieldHeight ++ "px")
+                ]
+                [ div [ class "note-editor-highlight" ]
+                    [ div
+                        [ class "note-editor-highlight-scroll"
+                        , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
+                        ]
+                        [ case model.highlightTree of
+                            Just tree ->
+                                Highlight.view tree
+
+                            Nothing ->
+                                text model.draftSource
+                        ]
                     ]
-                    [ div [ class "note-editor-highlight" ]
-                        [ div
-                            [ class "note-editor-highlight-scroll"
-                            , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
-                            ]
-                            [ case model.highlightTree of
-                                Just tree ->
-                                    Highlight.view tree
-
-                                Nothing ->
-                                    text model.draftSource
-                            ]
-                        ]
-                    , textarea
-                        [ id (textareaId model)
-                        , class "note-editor-field"
-                        , placeholder model.fieldPlaceholder
-                        , value model.draftSource
-                        , attribute "autocorrect" "off"
-                        , attribute "autocapitalize" "off"
-                        , spellcheck False
-                        , onInput DraftChanged
-                        , onBlur Committed
-                        , on "scroll" (Decode.map Scrolled (Decode.at [ "target", "scrollTop" ] Decode.float))
-                        , on "tide-image-added" imageEventDecoder
-                        ]
-                        []
-                    , div
-                        [ class "note-editor-resize-handle"
-                        , preventDefaultOn "mousedown"
-                            (Decode.map (\clientY -> ( HandlePressed clientY, True )) (Decode.field "clientY" Decode.float))
-                        ]
-                        []
+                , textarea
+                    [ id (textareaId model)
+                    , class "note-editor-field"
+                    , placeholder model.fieldPlaceholder
+                    , value model.draftSource
+                    , attribute "autocorrect" "off"
+                    , attribute "autocapitalize" "off"
+                    , spellcheck False
+                    , onInput DraftChanged
+                    , onBlur Committed
+                    , onFocus FocusRequested
+                    , on "scroll" (Decode.map Scrolled (Decode.at [ "target", "scrollTop" ] Decode.float))
+                    , on "tide-image-added" imageEventDecoder
                     ]
-                    :: (if String.trim model.draftSource == "" then
-                            []
+                    []
+                , div
+                    [ class "note-editor-resize-handle"
+                    , preventDefaultOn "mousedown"
+                        (Decode.map (\clientY -> ( HandlePressed clientY, True )) (Decode.field "clientY" Decode.float))
+                    ]
+                    []
+                ]
+                :: (if String.trim model.draftSource == "" then
+                        []
 
-                        else
-                            [ div [ class "note-editor-preview" ] [ previewView model.draftResult ] ]
-                       )
-                )
-            ]
-
-         else
+                    else
+                        [ div [ class "note-editor-preview" ] [ previewView model.draftResult ] ]
+                   )
+            )
+        , div [ class "editable-typst-preview-layer" ]
             [ previewView model.committedResult
             , span [ class "editable-typst-hint" ] [ text model.shortcutHint ]
             ]
-        )
+        ]
 
 
 previewView : Result String String -> Html msg

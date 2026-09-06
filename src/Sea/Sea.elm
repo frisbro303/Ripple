@@ -1,10 +1,11 @@
-module Sea.Sea exposing (Sea, applyOp, emptySea, fromOpsLog, getCard, getDue, insertCard, newCardsToday, nextDue, removeCard, size, toList, updateCard)
+module Sea.Sea exposing (Sea, applyOp, emptySea, fromOpsLog, getCard, getDue, insertCard, introducedCardIds, isIntroduced, newCardsToday, nextDue, removeCard, size, toList, updateCard)
 
 import Dict exposing (Dict)
 import Ops.Op exposing (Op, OpKind(..))
 import Ops.OpsLog as OpsLog exposing (OpsLog)
 import Sea.Card as Card
 import Sea.FSRS as FSRS
+import Set
 import Time exposing (Posix)
 import UUID
 
@@ -35,12 +36,51 @@ getDue now (Sea { cards }) =
         |> List.filter (Card.isDue now)
 
 
-nextDue : Bool -> Posix -> Sea -> Maybe Card.Card
-nextDue allowNew now sea =
+{-| The daily new-card limit caps how many cards get *introduced* per day —
+it's not a cap on how many times an already-introduced card is allowed to
+reappear while it's still cycling through its learning steps. So the gate
+below only ever excludes truly-untouched cards; a card that's mid-learning
+(has at least one review, per `introducedCardIds`) stays pickable regardless
+of whether today's new-card allowance has been used up, since blocking it
+would just strand it mid-steps until tomorrow.
+-}
+nextDue : Int -> Posix -> OpsLog -> Sea -> Maybe Card.Card
+nextDue dailyNewLimit now opsLog sea =
+    let
+        allowNewIntroductions =
+            newCardsToday now opsLog < dailyNewLimit
+
+        introduced =
+            introducedCardIds opsLog
+    in
     getDue now sea
-        |> List.filter (\card -> allowNew || not (FSRS.isNew card.fsrs))
+        |> List.filter (\card -> allowNewIntroductions || isIntroduced introduced card)
         |> List.sortBy (\card -> Time.posixToMillis card.fsrs.due)
         |> List.head
+
+
+{-| Card ids with at least one `ReviewCard` op ever submitted for them —
+i.e. cards that have been introduced, whether or not they've graduated out
+of learning yet.
+-}
+introducedCardIds : OpsLog -> Set.Set String
+introducedCardIds opsLog =
+    OpsLog.foldl
+        (\op acc ->
+            case op.opKind of
+                ReviewCard { id } ->
+                    Set.insert (UUID.toString id) acc
+
+                _ ->
+                    acc
+        )
+        Set.empty
+        opsLog
+
+
+isIntroduced : Set.Set String -> Card.Card -> Bool
+isIntroduced introduced card =
+    Set.member (UUID.toString card.id) introduced
 
 
 newCardsToday : Posix -> OpsLog -> Int
@@ -125,6 +165,16 @@ applyOp desiredRetention op sea =
         ReviewCard { id, rating } ->
             updateCard id
                 (Card.review desiredRetention op.timeStamp rating)
+                sea
+
+        ResetToLearning id ->
+            updateCard id
+                (Card.resetToLearning op.timeStamp)
+                sea
+
+        DeferCard { id, days } ->
+            updateCard id
+                (Card.defer days op.timeStamp)
                 sea
 
         SetPreamble _ ->

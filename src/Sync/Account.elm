@@ -1,8 +1,8 @@
 module Sync.Account exposing (Model, Msg(..), SessionUpdate(..), init, refresh, update, view)
 
-import Html exposing (Html, button, div, h3, input, p, span, text)
-import Html.Attributes exposing (class, placeholder, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Html exposing (Html, button, div, form, h3, input, p, span, text)
+import Html.Attributes exposing (class, placeholder, required, type_, value)
+import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -153,20 +153,12 @@ update msg model =
             ( { model | error = Nothing }, Cmd.none, SessionEstablished session )
 
         GotRefreshResponse (Err (AuthRejected _)) ->
-            -- The refresh token itself was rejected (expired, revoked, or
-            -- already rotated by another device) — there's no path back to a
-            -- working session without the user logging in again. Clearing it
-            -- here is what stops sync from retrying forever with a dead
-            -- token and hammering the server with repeated 401s.
             ( init, Cmd.none, SessionCleared )
 
         GotRefreshResponse (Err UnconfirmedEmail) ->
             ( model, Cmd.none, NoSessionChange )
 
         GotRefreshResponse (Err (OtherLoginError _)) ->
-            -- Network/transport failure, not a token rejection — keep the
-            -- locally-stored session so the app still looks logged in while
-            -- offline; nothing to update here.
             ( model, Cmd.none, NoSessionChange )
 
         SignupClicked ->
@@ -576,20 +568,20 @@ accountSection title fields =
 changeEmailForm : Session -> Model -> Html Msg
 changeEmailForm session model =
     div [ class "settings-field" ]
-        [ div [ class "settings-inline-field" ]
+        [ form
+            [ class "settings-inline-field"
+            , onSubmit (ChangeEmailClicked session.accessToken)
+            ]
             [ input
                 [ class "auth-input"
                 , type_ "email"
                 , placeholder "New email"
                 , value model.newEmail
                 , onInput NewEmailChanged
+                , required True
                 ]
                 []
-            , button
-                [ class "button-primary"
-                , onClick (ChangeEmailClicked session.accessToken)
-                ]
-                [ text "Update" ]
+            , button [ class "button-primary", type_ "submit" ] [ text "Update" ]
             ]
         , accountErrorView model.emailError
         , if model.emailSaved then
@@ -603,7 +595,10 @@ changeEmailForm session model =
 changePasswordForm : Session -> Model -> Html Msg
 changePasswordForm session model =
     div [ class "settings-field" ]
-        [ div [ class "settings-inline-field" ]
+        [ form
+            [ class "settings-inline-field"
+            , onSubmit (ChangePasswordClicked session.accessToken)
+            ]
             [ div [ class "settings-inline-field-inputs" ]
                 [ input
                     [ class "auth-input"
@@ -611,6 +606,7 @@ changePasswordForm session model =
                     , placeholder "New password"
                     , value model.newPassword
                     , onInput NewPasswordChanged
+                    , required True
                     ]
                     []
                 , input
@@ -619,14 +615,11 @@ changePasswordForm session model =
                     , placeholder "Confirm new password"
                     , value model.newPasswordConfirm
                     , onInput NewPasswordConfirmChanged
+                    , required True
                     ]
                     []
                 ]
-            , button
-                [ class "button-primary"
-                , onClick (ChangePasswordClicked session.accessToken)
-                ]
-                [ text "Update" ]
+            , button [ class "button-primary", type_ "submit" ] [ text "Update" ]
             ]
         , accountErrorView model.passwordError
         , if model.passwordSaved then
@@ -662,13 +655,23 @@ authForm model =
     in
     div [ class "auth-card" ]
         [ p [ class "auth-title" ] [ text modeLabel ]
-        , div [ class "auth-form" ]
+        , form
+            [ class "auth-form"
+            , onSubmit
+                (if isSignup then
+                    SignupClicked
+
+                 else
+                    LoginClicked
+                )
+            ]
             ([ input
                 [ class "auth-input"
                 , type_ "email"
                 , placeholder "Email"
                 , value model.email
                 , onInput EmailChanged
+                , required True
                 ]
                 []
              , input
@@ -677,6 +680,7 @@ authForm model =
                 , placeholder "Password"
                 , value model.password
                 , onInput PasswordChanged
+                , required True
                 ]
                 []
              ]
@@ -687,6 +691,7 @@ authForm model =
                             , placeholder "Confirm password"
                             , value model.confirmPassword
                             , onInput ConfirmPasswordChanged
+                            , required True
                             ]
                             []
                         ]
@@ -695,17 +700,7 @@ authForm model =
                         []
                    )
                 ++ [ errorView model.error
-                   , button
-                        [ class "button-primary"
-                        , onClick
-                            (if isSignup then
-                                SignupClicked
-
-                             else
-                                LoginClicked
-                            )
-                        ]
-                        [ text modeLabel ]
+                   , button [ class "button-primary", type_ "submit" ] [ text modeLabel ]
                    ]
             )
         , button [ class "auth-switch", onClick ModeToggled ]
@@ -730,17 +725,18 @@ forgotPasswordForm model =
     div [ class "auth-card" ]
         [ p [ class "auth-title" ] [ text "Reset password" ]
         , p [ class "auth-hint" ] [ text "We'll email you a code to reset your password." ]
-        , div [ class "auth-form" ]
+        , form [ class "auth-form", onSubmit SendRecoveryClicked ]
             [ input
                 [ class "auth-input"
                 , type_ "email"
                 , placeholder "Email"
                 , value model.email
                 , onInput EmailChanged
+                , required True
                 ]
                 []
             , errorView model.error
-            , button [ class "button-primary", onClick SendRecoveryClicked ] [ text "Send reset code" ]
+            , button [ class "button-primary", type_ "submit" ] [ text "Send reset code" ]
             ]
         , button [ class "auth-switch", onClick BackToLoginClicked ] [ text "Back to log in" ]
         ]
@@ -751,17 +747,18 @@ recoveryCodeForm model =
     div [ class "auth-card" ]
         [ p [ class "auth-title" ] [ text "Reset password" ]
         , p [ class "auth-hint" ] [ text ("Enter the code sent to " ++ model.email) ]
-        , div [ class "auth-form" ]
+        , form [ class "auth-form", onSubmit RecoveryCodeVerifyClicked ]
             [ input
                 [ class "auth-input"
                 , type_ "text"
                 , placeholder "Reset code"
                 , value model.code
                 , onInput CodeChanged
+                , required True
                 ]
                 []
             , errorView model.error
-            , button [ class "button-primary", onClick RecoveryCodeVerifyClicked ] [ text "Verify" ]
+            , button [ class "button-primary", type_ "submit" ] [ text "Verify" ]
             ]
         , button [ class "auth-switch", onClick SendRecoveryClicked ] [ text "Resend code" ]
         , button [ class "auth-switch", onClick BackToLoginClicked ] [ text "Back to log in" ]
@@ -773,17 +770,18 @@ verifyForm model =
     div [ class "auth-card" ]
         [ p [ class "auth-title" ] [ text "Confirm your email" ]
         , p [ class "auth-hint" ] [ text ("Enter the code sent to " ++ model.email) ]
-        , div [ class "auth-form" ]
+        , form [ class "auth-form", onSubmit VerifyClicked ]
             [ input
                 [ class "auth-input"
                 , type_ "text"
                 , placeholder "Verification code"
                 , value model.code
                 , onInput CodeChanged
+                , required True
                 ]
                 []
             , errorView model.error
-            , button [ class "button-primary", onClick VerifyClicked ] [ text "Verify" ]
+            , button [ class "button-primary", type_ "submit" ] [ text "Verify" ]
             ]
         , button [ class "auth-switch", onClick ResendClicked ] [ text "Resend code" ]
         ]

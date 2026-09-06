@@ -59,6 +59,36 @@ review desiredRetention now rating card =
             { card | fsrs = FSRS.review desiredRetention now rating card.fsrs }
 
 
+{-| Wipes a card's FSRS progress and puts it back at the front of the
+learning queue, due immediately — same starting state as a freshly created
+card, just keeping its id/front/back.
+-}
+resetToLearning : Posix -> Card -> Card
+resetToLearning now card =
+    { card
+        | fsrs = FSRS.initialState now
+        , learningStep = Just Learning.initialStep
+    }
+
+
+{-| Pushes a card's next appearance out by `days` from now, without
+touching its scheduling state (stability/difficulty/learning step) —
+a pure "not today" postponement, not a review.
+-}
+defer : Int -> Posix -> Card -> Card
+defer days now card =
+    let
+        fsrs =
+            card.fsrs
+    in
+    { card | fsrs = { fsrs | due = addDays days now } }
+
+
+addDays : Int -> Posix -> Posix
+addDays days t =
+    Time.millisToPosix (Time.posixToMillis t + days * 86400000)
+
+
 setFsrsDue : Posix -> Posix -> FSRS.State -> FSRS.State
 setFsrsDue now due fsrs =
     { fsrs | due = due, lastReview = now }

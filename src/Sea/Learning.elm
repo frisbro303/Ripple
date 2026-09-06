@@ -4,16 +4,17 @@ import Sea.FSRS exposing (Rating(..))
 import Time exposing (Posix)
 
 
-{-| Minutes between same-session re-shows for a card still in its learning
-steps. Fixed and short (not user-configurable), matching Anki's default new
-card steps ("1m 10m") — this exists precisely because FSRS-6's stability
-model is fit on day-scale review gaps and has no opinion on minute-scale
-scheduling. A card leaves this queue (and starts being scheduled by FSRS)
-once it passes the last step on a Good rating, or immediately on Easy.
+{-| Number of consecutive Good ratings needed to graduate a card out of the
+learning queue and into FSRS-6 scheduling. Cards resurface immediately
+(not after some fixed delay) as long as they're still learning, rather than
+making you wait a fixed number of minutes — a graduated card already can't
+come back same-day (`nextIntervalDays` floors at 1 day), so the only thing
+this queue is protecting against is FSRS-6's stability model, which is fit
+on day-scale gaps and has no opinion on sub-day scheduling.
 -}
-steps : List Float
-steps =
-    [ 1, 10 ]
+totalSteps : Int
+totalSteps =
+    2
 
 
 initialStep : Int
@@ -33,36 +34,18 @@ advance now rating step =
             Graduated
 
         Again ->
-            StillLearning { step = initialStep, due = addMinutes (stepMinutes initialStep) now }
+            StillLearning { step = initialStep, due = now }
 
         Hard ->
-            -- Simplified relative to Anki (which averages the current and
-            -- next step): just repeats the current step's delay.
-            StillLearning { step = step, due = addMinutes (stepMinutes step) now }
+            StillLearning { step = step, due = now }
 
         Good ->
             let
                 nextStep =
                     step + 1
             in
-            case stepMinutesAt nextStep of
-                Just minutes ->
-                    StillLearning { step = nextStep, due = addMinutes minutes now }
+            if nextStep >= totalSteps then
+                Graduated
 
-                Nothing ->
-                    Graduated
-
-
-stepMinutes : Int -> Float
-stepMinutes step =
-    stepMinutesAt step |> Maybe.withDefault 1
-
-
-stepMinutesAt : Int -> Maybe Float
-stepMinutesAt step =
-    steps |> List.drop step |> List.head
-
-
-addMinutes : Float -> Posix -> Posix
-addMinutes minutes t =
-    Time.millisToPosix (Time.posixToMillis t + round (minutes * 60000))
+            else
+                StillLearning { step = nextStep, due = now }

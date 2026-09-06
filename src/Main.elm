@@ -7,10 +7,10 @@ import Data
 import Dict exposing (Dict)
 import Html exposing (Html, a, button, div, h3, span, text)
 import Html.Attributes exposing (attribute, class, classList, href, rel, target)
-import List.Extra
 import Html.Events exposing (onClick)
 import Json.Decode as Decode
 import Json.Encode as Encode
+import List.Extra
 import Local.Store as Store
 import LucideIcons
 import Ops.Op as Op
@@ -222,17 +222,27 @@ syncRetentionFromOps model =
             ( model, Cmd.none )
 
 
-applySyncStatus : LocalOps.SyncStatus -> Model -> Model
+applySyncStatus : LocalOps.SyncStatus -> Model -> ( Model, Cmd Msg )
 applySyncStatus status model =
     case status of
         LocalOps.NoStatusChange ->
-            model
+            ( model, Cmd.none )
 
         LocalOps.SyncFailed message ->
-            { model | syncError = Just message }
+            ( { model | syncError = Just message }, Cmd.none )
+
+        LocalOps.SessionExpired ->
+            ( { model | syncError = Just "Reconnecting..." }
+            , case model.session of
+                Just session ->
+                    Cmd.map AccountMsg (Account.refresh session.refreshToken)
+
+                Nothing ->
+                    Cmd.none
+            )
 
         LocalOps.SyncSucceeded ->
-            { model | syncError = Nothing }
+            ( { model | syncError = Nothing }, Cmd.none )
 
 
 newOpId : Time.Posix -> Op.OpId
@@ -283,15 +293,16 @@ updateInner msg model =
             let
                 ( localOpsModel, cmd, syncStatus ) =
                     LocalOps.update model.session localOpsMsg model.localOps
+
+                ( updatedModel, statusCmd ) =
+                    applySyncStatus syncStatus { model | localOps = localOpsModel }
             in
-            ( applySyncStatus syncStatus { model | localOps = localOpsModel }
-            , Cmd.batch [ Cmd.map LocalOpsMsg cmd, pickIfIdle model.review ]
+            ( updatedModel
+            , Cmd.batch [ Cmd.map LocalOpsMsg cmd, statusCmd, pickIfIdle model.review ]
             )
 
         AddMsg addMsg ->
             handleAddMsg addMsg model
-
-
 
         ReviewMsg reviewMsg ->
             handleReviewMsg reviewMsg model
@@ -302,7 +313,7 @@ updateInner msg model =
                     Sea.fromOpsLog (Settings.desiredRetention model.settings) model.localOps
 
                 ( statsModel, statsCmd ) =
-                    Stats.update model.localOps sea statsMsg model.stats
+                    Stats.update (Settings.dailyNewLimit model.settings) model.localOps sea statsMsg model.stats
             in
             ( { model | stats = statsModel }, Cmd.map StatsMsg statsCmd )
 
@@ -392,8 +403,11 @@ updateInner msg model =
                     let
                         ( localOpsModel, cmd, syncStatus ) =
                             LocalOps.update model.session (LocalOps.ImportedOps (OpsLog.fromList ops)) model.localOps
+
+                        ( updatedModel, statusCmd ) =
+                            applySyncStatus syncStatus { model | localOps = localOpsModel }
                     in
-                    ( applySyncStatus syncStatus { model | localOps = localOpsModel }, Cmd.map LocalOpsMsg cmd )
+                    ( updatedModel, Cmd.batch [ Cmd.map LocalOpsMsg cmd, statusCmd ] )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -441,7 +455,7 @@ handleReviewMsg reviewMsg model =
             Sea.fromOpsLog (Settings.desiredRetention model.settings) model.localOps
 
         ( reviewModel, reviewCmd, outMsg ) =
-            Review.update (Settings.typstPreamble model.settings) (Settings.dailyNewLimit model.settings) (latestImages model.localOps) model.localOps sea reviewMsg model.review
+            Review.update (Settings.typstPreamble model.settings) (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) (latestImages model.localOps) model.localOps sea reviewMsg model.review
 
         ( afterOutModel, outCmd ) =
             case outMsg of
@@ -457,6 +471,9 @@ handleReviewMsg reviewMsg model =
 
                 Review.AddRequested ->
                     ( { model | page = Page.Add }, Cmd.none )
+
+                Review.LoginRequested ->
+                    ( { model | page = Page.Account }, Cmd.none )
 
                 Review.ImagePersisted op ->
                     let
@@ -518,20 +535,6 @@ pickIfIdle reviewModel =
 
     else
         Cmd.none
-
-
-
--- Cmd/Ctrl+1..4 switch pages (toggling the active one back to Review, same
--- as clicking its icon); Escape always returns to Review. On the Review page
--- itself (and only when focus isn't in a text field): Space/Enter reveals,
--- Space also rates Good once revealed, 1-4 rate Again/Hard/Good/Easy. Editing
--- front/back uses bare vim/helix-style normal-mode keys rather than a Cmd
--- combo — Cmd+W in particular is macOS's reserved "close window" shortcut,
--- and a global key subscription can't preventDefault it, so the OS wins and
--- closes the app before our handler ever sees the keystroke. "i" (insert)
--- edits the front; "o" (open-below, since back appears below the divider
--- once revealed) edits the back — on Review only once revealed; on Add both
--- are available immediately since neither field is gated behind a reveal.
 
 
 handleKeyPressed : KeyEvent -> Model -> ( Model, Cmd Msg )
@@ -739,7 +742,7 @@ pageContent : Model -> Html Msg
 pageContent model =
     case model.page of
         Page.Review ->
-            Html.map ReviewMsg (Review.view model.review)
+            Html.map ReviewMsg (Review.view (Settings.deferDays model.settings) (model.session /= Nothing) model.review)
 
         Page.Add ->
             Html.map AddMsg (Add.view model.add)

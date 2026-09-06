@@ -114,7 +114,12 @@ type Msg
     | MenuToggled
     | DeleteClicked
     | GotTimeForDelete Card.CardId Time.Posix
+    | ResetLearningClicked
+    | GotTimeForResetLearning Card.CardId Time.Posix
+    | DeferClicked
+    | GotTimeForDefer Card.CardId Time.Posix
     | AddCardClicked
+    | LoginClicked
     | GotTimeForImageOp String String Time.Posix
     | ThemeChanged
 
@@ -123,6 +128,7 @@ type OutMsg
     = NoOutMsg
     | Submitted Op
     | AddRequested
+    | LoginRequested
     | ImagePersisted Op
 
 
@@ -133,15 +139,11 @@ newOpId now =
         |> OpId
 
 
-update : String -> Int -> Dict String String -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update preamble dailyNewLimit knownImages opsLog sea msg model =
+update : String -> Int -> Int -> Dict String String -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
     case msg of
         GotTimeForPick now ->
-            let
-                allowNew =
-                    Sea.newCardsToday now opsLog < dailyNewLimit
-            in
-            case Sea.nextDue allowNew now sea of
+            case Sea.nextDue dailyNewLimit now opsLog sea of
                 Nothing ->
                     ( Empty, Cmd.none, NoOutMsg )
 
@@ -297,8 +299,53 @@ update preamble dailyNewLimit knownImages opsLog sea msg model =
             in
             ( NotAsked, requestPick, Submitted op )
 
+        ResetLearningClicked ->
+            case model of
+                Reviewing current ->
+                    ( Reviewing { current | menuOpen = False }
+                    , Task.perform (GotTimeForResetLearning current.id) Time.now
+                    , NoOutMsg
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOutMsg )
+
+        GotTimeForResetLearning cardId now ->
+            let
+                op =
+                    { id = newOpId now
+                    , timeStamp = now
+                    , opKind = ResetToLearning cardId
+                    }
+            in
+            ( NotAsked, requestPick, Submitted op )
+
+        DeferClicked ->
+            case model of
+                Reviewing current ->
+                    ( Reviewing { current | menuOpen = False }
+                    , Task.perform (GotTimeForDefer current.id) Time.now
+                    , NoOutMsg
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOutMsg )
+
+        GotTimeForDefer cardId now ->
+            let
+                op =
+                    { id = newOpId now
+                    , timeStamp = now
+                    , opKind = DeferCard { id = cardId, days = deferDays }
+                    }
+            in
+            ( NotAsked, requestPick, Submitted op )
+
         AddCardClicked ->
             ( model, Cmd.none, AddRequested )
+
+        LoginClicked ->
+            ( model, Cmd.none, LoginRequested )
 
         GotTimeForImageOp imgId data now ->
             let
@@ -342,18 +389,25 @@ subscriptions model =
             Sub.none
 
 
-view : Model -> Html Msg
-view model =
+view : Int -> Bool -> Model -> Html Msg
+view deferDays isLoggedIn model =
     case model of
         NotAsked ->
             p [ class "review-empty" ] [ text "Loading..." ]
 
         Empty ->
             div [ class "review-empty-state" ]
-                [ p [ class "review-empty" ] [ text "No cards due." ]
-                , p [ class "review-empty review-empty-subtitle" ] [ text "Great work, you're all caught up." ]
-                , button [ class "button-primary", onClick AddCardClicked ] [ text "Add a card now" ]
-                ]
+                ([ p [ class "review-empty" ] [ text "No cards due." ]
+                 , p [ class "review-empty review-empty-subtitle" ] [ text "Great work, you're all caught up." ]
+                 , button [ class "button-primary", onClick AddCardClicked ] [ text "Add a card now" ]
+                 ]
+                    ++ (if isLoggedIn then
+                            []
+
+                        else
+                            [ button [ class "button-ghost", onClick LoginClicked ] [ text "Log in to sync" ] ]
+                       )
+                )
 
         Reviewing current ->
             div [ class "review-stage" ]
@@ -364,6 +418,16 @@ view model =
                                 [ div [ class "context-menu-overlay", onClick MenuToggled ] []
                                 , div [ class "card-menu-popover" ]
                                     [ button
+                                        [ class "context-menu-item"
+                                        , onClick ResetLearningClicked
+                                        ]
+                                        [ text "Push to learning" ]
+                                    , button
+                                        [ class "context-menu-item"
+                                        , onClick DeferClicked
+                                        ]
+                                        [ text ("Defer (+" ++ String.fromInt deferDays ++ " days)") ]
+                                    , button
                                         [ class "context-menu-item context-menu-item--danger"
                                         , onClick DeleteClicked
                                         ]
