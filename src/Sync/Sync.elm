@@ -1,4 +1,4 @@
-module Sync.Sync exposing (appendOps, fetchOps)
+module Sync.Sync exposing (appendOps, fetchOpIds, fetchOps)
 
 import Http
 import Json.Decode as Decode
@@ -20,6 +20,28 @@ fetchOps session toMsg =
         , url = supabaseUrl ++ "/rest/v1/ops_log?select=*"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.map OpsLog.fromList (Decode.list Op.decoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+-- A cheap probe for "has anything changed" — just the `id` column, not the
+-- full row (which can carry a base64-encoded card image via AddImage).
+-- Polling this instead of the full table lets the caller skip `fetchOps`
+-- entirely on ticks where nothing changed, which is the common case.
+
+
+fetchOpIds : Session -> (Result Http.Error (List String) -> msg) -> Cmd msg
+fetchOpIds session toMsg =
+    Http.request
+        { method = "GET"
+        , headers =
+            [ Http.header "apikey" anonKey
+            , Http.header "Authorization" ("Bearer " ++ session.accessToken)
+            ]
+        , url = supabaseUrl ++ "/rest/v1/ops_log?select=id"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.list (Decode.field "id" Decode.string))
         , timeout = Nothing
         , tracker = Nothing
         }

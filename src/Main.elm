@@ -1,6 +1,5 @@
 module Main exposing (main)
 
-import Add
 import Browser
 import Browser.Events
 import Data
@@ -16,18 +15,20 @@ import LucideIcons
 import Ops.Op as Op
 import Ops.OpsLog as OpsLog exposing (OpsLog)
 import Page exposing (Page)
+import Pages.Add as Add
+import Pages.Review as Review
+import Pages.Settings as Settings
+import Pages.Stats as Stats
 import Random
-import Review
 import Sea.FSRS exposing (Rating(..))
 import Sea.Sea as Sea
-import Settings
-import Stats
 import Svg.Attributes exposing (height, width)
 import Sync.Account as Account
 import Sync.LocalOps as LocalOps
 import Sync.Session as Session exposing (Session)
 import Sync.SessionLifecycle as SessionLifecycle
 import Task
+import Theme
 import Time
 import UUID
 
@@ -322,9 +323,6 @@ updateInner msg model =
                 ( settingsModel, settingsCmd, syncUpdate ) =
                     Settings.update settingsMsg model.settings
 
-                themeChanged =
-                    settingsModel.theme /= model.settings.theme
-
                 opCmd =
                     case syncUpdate of
                         Settings.PreambleCommitted preamble ->
@@ -343,26 +341,9 @@ updateInner msg model =
 
                         Settings.NoSyncUpdate ->
                             Cmd.none
-
-                modelAfterSettings =
-                    { model | settings = settingsModel }
-
-                ( modelAfterTheme, themeCmd ) =
-                    if themeChanged then
-                        let
-                            ( modelAfterAdd, addCmd ) =
-                                handleAddMsg Add.themeChanged modelAfterSettings
-
-                            ( modelAfterReview, reviewCmd ) =
-                                handleReviewMsg Review.themeChanged modelAfterAdd
-                        in
-                        ( modelAfterReview, Cmd.batch [ addCmd, reviewCmd ] )
-
-                    else
-                        ( modelAfterSettings, Cmd.none )
             in
-            ( modelAfterTheme
-            , Cmd.batch [ Cmd.map SettingsMsg settingsCmd, opCmd, themeCmd ]
+            ( { model | settings = settingsModel }
+            , Cmd.batch [ Cmd.map SettingsMsg settingsCmd, opCmd ]
             )
 
         GotTimeForPreambleOp preamble now ->
@@ -455,7 +436,7 @@ handleReviewMsg reviewMsg model =
             Sea.fromOpsLog (Settings.desiredRetention model.settings) model.localOps
 
         ( reviewModel, reviewCmd, outMsg ) =
-            Review.update (Settings.typstPreamble model.settings) (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) (latestImages model.localOps) model.localOps sea reviewMsg model.review
+            Review.update (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) model.localOps sea reviewMsg model.review
 
         ( afterOutModel, outCmd ) =
             case outMsg of
@@ -742,10 +723,18 @@ pageContent : Model -> Html Msg
 pageContent model =
     case model.page of
         Page.Review ->
-            Html.map ReviewMsg (Review.view (Settings.deferDays model.settings) (model.session /= Nothing) model.review)
+            Html.map ReviewMsg
+                (Review.view
+                    (Settings.typstPreamble model.settings)
+                    (latestImages model.localOps)
+                    (Theme.toString model.settings.theme)
+                    (Settings.deferDays model.settings)
+                    (model.session /= Nothing)
+                    model.review
+                )
 
         Page.Add ->
-            Html.map AddMsg (Add.view model.add)
+            Html.map AddMsg (Add.view (Theme.toString model.settings.theme) model.add)
 
         Page.Stats ->
             div [ class "stats-card" ] [ Html.map StatsMsg (Stats.view model.stats) ]
@@ -800,9 +789,6 @@ subscriptions model =
     Sub.batch
         [ Store.loaded StoreLoaded
         , Sub.map LocalOpsMsg (LocalOps.subscriptions model.session)
-        , Sub.map AddMsg (Add.subscriptions model.add)
-        , Sub.map ReviewMsg (Review.subscriptions model.review)
-        , Sub.map SettingsMsg (Settings.subscriptions model.settings)
         , Data.importLoaded GotImportedJson
         , Browser.Events.onKeyDown keyEventDecoder |> Sub.map KeyPressed
         ]

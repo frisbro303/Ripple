@@ -11,12 +11,11 @@
     <script src="./elm.js"></script>
     <script type="module">
       import { setupTauri } from "./tauri.js";
-      import { setupEditorNiceties } from "./Typst/editor.js";
+      import "./Typst/note-editor.js";
       const app = Elm.Main.init({
         node: document.getElementById("app"),
       });
       setupTauri(app);
-      setupEditorNiceties();
     </script>
   </body>
 </html>

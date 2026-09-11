@@ -1,4 +1,4 @@
-module Stats exposing (History, HistoryDay, Model, Msg, Summary, init, requestSummary, summarize, update, view)
+module Pages.Stats exposing (History, HistoryDay, Model, Msg, Summary, init, requestSummary, summarize, update, view)
 
 import Date exposing (Date)
 import Dict exposing (Dict)

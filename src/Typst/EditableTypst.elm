@@ -1,108 +1,41 @@
-module Typst.EditableTypst exposing (Model, Msg, OutMsg(..), currentSource, init, initWithSource, isBlank, recompile, requestFocus, subscriptions, update, view)
+module Typst.EditableTypst exposing (Model, Msg, OutMsg(..), ViewConfig, currentSource, init, initWithSource, isBlank, requestFocus, update, view)
 
-import Browser.Events
 import Dict exposing (Dict)
-import Html exposing (Html, div, img, span, text, textarea)
-import Html.Attributes exposing (attribute, class, classList, id, placeholder, spellcheck, src, style, value)
-import Html.Events exposing (on, onBlur, onClick, onFocus, onInput, preventDefaultOn)
+import Html exposing (Html, node)
+import Html.Attributes exposing (attribute, class, property)
+import Html.Events exposing (on)
 import Json.Decode as Decode
-import Typst.Highlight as Highlight
+import Json.Encode as Encode
 import Typst.Port as Port
-import Url
 
 
 type alias Model =
     { id : String
     , fieldPlaceholder : String
     , shortcutHint : String
-    , preamble : String
     , committedSource : String
-    , committedResult : Result String String
-    , draftSource : String
-    , draftResult : Result String String
-    , manualEditing : Bool
-    , fieldHeight : Float
-    , drag : Maybe Drag
-    , scrollTop : Float
-    , highlightTree : Maybe Highlight.Node
-    , knownImages : Dict String String
-    , pendingImages : Dict String String
+    , liveSource : String
     }
 
 
-type alias Drag =
-    { startY : Float
-    , startHeight : Float
-    }
-
-
-defaultFieldHeight : Float
-defaultFieldHeight =
-    96
-
-
-minFieldHeight : Float
-minFieldHeight =
-    64
-
-
-maxFieldHeight : Float
-maxFieldHeight =
-    480
-
-
-init : String -> String -> String -> String -> Dict String String -> Model
-init id fieldPlaceholder shortcutHint preamble knownImages =
+init : String -> String -> String -> Model
+init id fieldPlaceholder shortcutHint =
     { id = id
     , fieldPlaceholder = fieldPlaceholder
     , shortcutHint = shortcutHint
-    , preamble = preamble
     , committedSource = ""
-    , committedResult = Err ""
-    , draftSource = ""
-    , draftResult = Err ""
-    , manualEditing = False
-    , fieldHeight = defaultFieldHeight
-    , drag = Nothing
-    , scrollTop = 0
-    , highlightTree = Nothing
-    , knownImages = knownImages
-    , pendingImages = Dict.empty
+    , liveSource = ""
     }
 
 
-initWithSource : String -> String -> String -> String -> Dict String String -> String -> ( Model, Cmd Msg )
-initWithSource id fieldPlaceholder shortcutHint preamble knownImages existingSource =
-    ( { id = id
-      , fieldPlaceholder = fieldPlaceholder
-      , shortcutHint = shortcutHint
-      , preamble = preamble
-      , committedSource = existingSource
-      , committedResult = Err ""
-      , draftSource = existingSource
-      , draftResult = Err ""
-      , manualEditing = False
-      , fieldHeight = defaultFieldHeight
-      , drag = Nothing
-      , scrollTop = 0
-      , highlightTree = Nothing
-      , knownImages = knownImages
-      , pendingImages = Dict.empty
-      }
-    , if String.trim existingSource == "" then
-        Cmd.none
-
-      else
-        Cmd.batch
-            [ Port.compileTypst id preamble existingSource (imageAttachments knownImages Dict.empty existingSource)
-            , Port.highlightTypst id existingSource
-            ]
-    )
-
-
-isEditing : Model -> Bool
-isEditing model =
-    model.manualEditing || isBlank model
+initWithSource : String -> String -> String -> String -> Model
+initWithSource id fieldPlaceholder shortcutHint existingSource =
+    { id = id
+    , fieldPlaceholder = fieldPlaceholder
+    , shortcutHint = shortcutHint
+    , committedSource = existingSource
+    , liveSource = existingSource
+    }
 
 
 isBlank : Model -> Bool
@@ -112,65 +45,24 @@ isBlank model =
 
 currentSource : Model -> String
 currentSource model =
-    if model.manualEditing then
-        model.draftSource
-
-    else
-        model.committedSource
-
-
-referencedImageIds : String -> List String
-referencedImageIds source =
-    String.split "#image(\"" source
-        |> List.drop 1
-        |> List.filterMap
-            (\chunk ->
-                case String.split "\"" chunk of
-                    first :: _ ->
-                        if String.endsWith ".png" first then
-                            Just (String.dropRight 4 first)
-
-                        else
-                            Nothing
-
-                    [] ->
-                        Nothing
-            )
-
-
-imageAttachments : Dict String String -> Dict String String -> String -> List ( String, String )
-imageAttachments knownImages pendingImages source =
-    let
-        allImages =
-            Dict.union pendingImages knownImages
-    in
-    referencedImageIds source
-        |> List.filterMap (\imgId -> Dict.get imgId allImages |> Maybe.map (\data -> ( imgId ++ ".png", data )))
+    model.liveSource
 
 
 type Msg
-    = EditStarted
-    | FocusRequested
-    | DraftChanged String
+    = LiveInput String
+    | Committed String
     | ImageReceived String String
-    | GotDraftResult String (Result String String)
-    | GotHighlightTree String Decode.Value
-    | Committed
-    | HandlePressed Float
-    | HandleDragged Float
-    | HandleReleased
-    | Scrolled Float
-    | Recompile
+    | FocusRequested
 
 
+{-| Opaque: callers never need to know which Msg it maps to, only that
+sending it starts editing and moves the OS keyboard focus into this field,
+synchronously (via the `focusField` port) within the originating keydown's
+own call stack.
+-}
 requestFocus : Msg
 requestFocus =
     FocusRequested
-
-
-recompile : Msg
-recompile =
-    Recompile
 
 
 type OutMsg
@@ -182,148 +74,70 @@ type OutMsg
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
-        EditStarted ->
-            if isEditing model then
-                ( model, Cmd.none, NoOutMsg )
+        LiveInput source ->
+            ( { model | liveSource = source }, Cmd.none, NoOutMsg )
 
-            else
-                ( { model
-                    | manualEditing = True
-                    , draftSource = model.committedSource
-                    , draftResult = model.committedResult
-                  }
-                , Port.focusField (textareaId model)
-                , NoOutMsg
-                )
-
-        FocusRequested ->
-            ( if model.manualEditing then
-                model
-
-              else
-                { model
-                    | manualEditing = True
-                    , draftSource = model.committedSource
-                    , draftResult = model.committedResult
-                }
-            , Port.focusField (textareaId model)
-            , NoOutMsg
-            )
-
-        DraftChanged newSource ->
-            ( { model | draftSource = newSource }
-            , Cmd.batch
-                [ Port.compileTypst model.id model.preamble newSource (imageAttachments model.knownImages model.pendingImages newSource)
-                , Port.highlightTypst model.id newSource
-                ]
-            , NoOutMsg
-            )
-
-        ImageReceived imgId data ->
-            let
-                newModel =
-                    { model | pendingImages = Dict.insert imgId data model.pendingImages }
-            in
-            ( newModel
-            , Port.compileTypst newModel.id newModel.preamble newModel.draftSource (imageAttachments newModel.knownImages newModel.pendingImages newModel.draftSource)
-            , ImageAdded imgId data
-            )
-
-        GotDraftResult requestId result ->
-            if requestId /= model.id then
-                ( model, Cmd.none, NoOutMsg )
-
-            else if isEditing model then
-                -- Covers both actively typing (manualEditing) and a fresh
-                -- blank field (isBlank implies isEditing even though
-                -- manualEditing is still False) — either way the textarea
-                -- is showing, so the result belongs in the draft preview.
-                ( { model | draftResult = result }, Cmd.none, NoOutMsg )
-
-            else
-                ( { model | committedResult = result }, Cmd.none, NoOutMsg )
-
-        GotHighlightTree requestId value ->
-            if requestId /= model.id then
-                ( model, Cmd.none, NoOutMsg )
-
-            else
-                ( { model | highlightTree = Decode.decodeValue Highlight.decoder value |> Result.toMaybe }
-                , Cmd.none
-                , NoOutMsg
-                )
-
-        Committed ->
+        Committed source ->
             let
                 changed =
-                    model.draftSource /= model.committedSource
+                    source /= model.committedSource
             in
-            ( { model
-                | manualEditing = False
-                , committedSource = model.draftSource
-                , committedResult = model.draftResult
-              }
+            ( { model | committedSource = source, liveSource = source }
             , Cmd.none
             , if changed then
-                SourceCommitted model.draftSource
+                SourceCommitted source
 
               else
                 NoOutMsg
             )
 
-        HandlePressed clientY ->
-            ( { model | drag = Just { startY = clientY, startHeight = model.fieldHeight } }
-            , Cmd.none
-            , NoOutMsg
-            )
+        ImageReceived imgId data ->
+            ( model, Cmd.none, ImageAdded imgId data )
 
-        HandleDragged clientY ->
-            case model.drag of
-                Just drag ->
-                    ( { model | fieldHeight = clamp minFieldHeight maxFieldHeight (drag.startHeight + (clientY - drag.startY)) }
-                    , Cmd.none
-                    , NoOutMsg
-                    )
-
-                Nothing ->
-                    ( model, Cmd.none, NoOutMsg )
-
-        HandleReleased ->
-            ( { model | drag = Nothing }, Cmd.none, NoOutMsg )
-
-        Scrolled scrollTop ->
-            ( { model | scrollTop = scrollTop }, Cmd.none, NoOutMsg )
-
-        Recompile ->
-            let
-                source =
-                    currentSource model
-            in
-            if String.trim source == "" then
-                ( model, Cmd.none, NoOutMsg )
-
-            else
-                ( model
-                , Port.compileTypst model.id model.preamble source (imageAttachments model.knownImages model.pendingImages source)
-                , NoOutMsg
-                )
+        FocusRequested ->
+            ( model, Port.focusField model.id, NoOutMsg )
 
 
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    Sub.batch
-        [ Port.typstCompiled GotDraftResult
-        , Port.typstHighlighted GotHighlightTree
-        , case model.drag of
-            Just _ ->
-                Sub.batch
-                    [ Browser.Events.onMouseMove (Decode.map HandleDragged (Decode.field "clientY" Decode.float))
-                    , Browser.Events.onMouseUp (Decode.succeed HandleReleased)
-                    ]
+{-| Not part of Model: `preamble`/`knownImages` can change independently of
+any particular field (e.g. a new image pasted into the other field), and
+`theme` is purely a render-time concern now that recompiling on theme change
+is just an attribute change picked up by <typst-note-editor> itself.
+-}
+type alias ViewConfig =
+    { preamble : String
+    , knownImages : Dict String String
+    , theme : String
+    , nextField : Maybe String
+    , submitSelector : Maybe String
+    }
 
-            Nothing ->
-                Sub.none
-        ]
+
+view : ViewConfig -> Model -> Html Msg
+view config model =
+    node "typst-note-editor"
+        (List.concat
+            [ [ class "review-box"
+              , attribute "field-id" model.id
+              , attribute "source" model.committedSource
+              , attribute "preamble" config.preamble
+              , attribute "placeholder" model.fieldPlaceholder
+              , attribute "shortcut-hint" model.shortcutHint
+              , attribute "theme" config.theme
+              , property "knownImages" (encodeImages config.knownImages)
+              , on "tide-note-committed" (Decode.map Committed detailValueDecoder)
+              , on "tide-note-input" (Decode.map LiveInput detailValueDecoder)
+              , on "tide-image-added" imageEventDecoder
+              ]
+            , config.nextField |> Maybe.map (\f -> [ attribute "next-field" f ]) |> Maybe.withDefault []
+            , config.submitSelector |> Maybe.map (\s -> [ attribute "submit-selector" s ]) |> Maybe.withDefault []
+            ]
+        )
+        []
+
+
+detailValueDecoder : Decode.Decoder String
+detailValueDecoder =
+    Decode.at [ "detail", "value" ] Decode.string
 
 
 imageEventDecoder : Decode.Decoder Msg
@@ -333,94 +147,6 @@ imageEventDecoder =
         (Decode.at [ "detail", "data" ] Decode.string)
 
 
-{-| The editing subtree (the textarea in particular) stays mounted in the
-DOM at all times, rather than being conditionally created only once
-`isEditing` flips — visibility toggles via the `review-box--editing` class
-instead. This matters specifically for iOS: focusing a textarea only
-raises the on-screen keyboard when `.focus()` runs synchronously within the
-original tap's call stack. Elm's own re-render (which would otherwise be
-what creates the textarea in the first place) is scheduled on the next
-animation frame, not synchronously — so by the time a not-yet-existing
-element could be found and focused, the tap's "user activation" window has
-already closed and WebKit silently declines to show the keyboard. Keeping
-the node around means focusing it never has to wait on a render.
--}
-view : Model -> Html Msg
-view model =
-    div
-        [ class "review-box"
-        , classList [ ( "review-box--editing", isEditing model ) ]
-        , onClick EditStarted
-        ]
-        [ div [ class "editable-typst-edit" ]
-            (div
-                [ class "note-editor-field-wrap"
-                , style "height" (String.fromFloat model.fieldHeight ++ "px")
-                ]
-                [ div [ class "note-editor-highlight" ]
-                    [ div
-                        [ class "note-editor-highlight-scroll"
-                        , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
-                        ]
-                        [ case model.highlightTree of
-                            Just tree ->
-                                Highlight.view tree
-
-                            Nothing ->
-                                text model.draftSource
-                        ]
-                    ]
-                , textarea
-                    [ id (textareaId model)
-                    , class "note-editor-field"
-                    , placeholder model.fieldPlaceholder
-                    , value model.draftSource
-                    , attribute "autocorrect" "off"
-                    , attribute "autocapitalize" "off"
-                    , spellcheck False
-                    , onInput DraftChanged
-                    , onBlur Committed
-                    , onFocus FocusRequested
-                    , on "scroll" (Decode.map Scrolled (Decode.at [ "target", "scrollTop" ] Decode.float))
-                    , on "tide-image-added" imageEventDecoder
-                    ]
-                    []
-                , div
-                    [ class "note-editor-resize-handle"
-                    , preventDefaultOn "mousedown"
-                        (Decode.map (\clientY -> ( HandlePressed clientY, True )) (Decode.field "clientY" Decode.float))
-                    ]
-                    []
-                ]
-                :: (if String.trim model.draftSource == "" then
-                        []
-
-                    else
-                        [ div [ class "note-editor-preview" ] [ previewView model.draftResult ] ]
-                   )
-            )
-        , div [ class "editable-typst-preview-layer" ]
-            [ previewView model.committedResult
-            , span [ class "editable-typst-hint" ] [ text model.shortcutHint ]
-            ]
-        ]
-
-
-previewView : Result String String -> Html msg
-previewView result =
-    case result of
-        Ok svg ->
-            img [ src (svgDataUrl svg) ] []
-
-        Err error ->
-            div [ class "note-editor-error" ] [ text error ]
-
-
-svgDataUrl : String -> String
-svgDataUrl svg =
-    "data:image/svg+xml;charset=utf-8," ++ Url.percentEncode svg
-
-
-textareaId : Model -> String
-textareaId model =
-    "editable-typst-" ++ model.id
+encodeImages : Dict String String -> Encode.Value
+encodeImages images =
+    Encode.object (Dict.toList images |> List.map (Tuple.mapSecond Encode.string))

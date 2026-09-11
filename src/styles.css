@@ -477,6 +477,15 @@ button:focus-visible .btn-hint {
 }
 
 
+/* <typst-code-field> is an additional light-DOM wrapping level around
+   .note-editor-field-wrap that didn't exist before this became a custom
+   element — `display: contents` makes it generate no box of its own, so
+   .note-editor-field-wrap becomes a direct flex item of whatever the parent
+   is, exactly as it was before. */
+typst-code-field {
+  display: contents;
+}
+
 .note-editor-field-wrap {
   position: relative;
   width: 100%;

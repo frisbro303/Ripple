@@ -1,4 +1,4 @@
-module Review exposing (Model, Msg, OutMsg(..), editBack, editFront, init, isIdle, isRevealed, rate, requestPick, reveal, subscriptions, themeChanged, update, view, viewActions)
+module Pages.Review exposing (Model, Msg, OutMsg(..), editBack, editFront, init, isIdle, isRevealed, rate, requestPick, reveal, update, view, viewActions)
 
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, hr, p, span, text)
@@ -88,11 +88,6 @@ editBack =
     BackMsg EditableTypst.requestFocus
 
 
-themeChanged : Msg
-themeChanged =
-    ThemeChanged
-
-
 rate : Rating -> Msg
 rate =
     RateClicked
@@ -121,7 +116,6 @@ type Msg
     | AddCardClicked
     | LoginClicked
     | GotTimeForImageOp String String Time.Posix
-    | ThemeChanged
 
 
 type OutMsg
@@ -139,8 +133,8 @@ newOpId now =
         |> OpId
 
 
-update : String -> Int -> Int -> Dict String String -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
+update : Int -> Int -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+update dailyNewLimit deferDays opsLog sea msg model =
     case msg of
         GotTimeForPick now ->
             case Sea.nextDue dailyNewLimit now opsLog sea of
@@ -148,21 +142,14 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
                     ( Empty, Cmd.none, NoOutMsg )
 
                 Just card ->
-                    let
-                        ( frontModel, frontCmd ) =
-                            EditableTypst.initWithSource "review-front" "Front" "i" preamble knownImages card.front
-
-                        ( backModel, backCmd ) =
-                            EditableTypst.initWithSource "review-back" "Back" "o" preamble knownImages card.back
-                    in
                     ( Reviewing
                         { id = card.id
-                        , front = frontModel
-                        , back = backModel
+                        , front = EditableTypst.initWithSource "review-front" "Front" "i" card.front
+                        , back = EditableTypst.initWithSource "review-back" "Back" "o" card.back
                         , revealed = False
                         , menuOpen = False
                         }
-                    , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
+                    , Cmd.none
                     , NoOutMsg
                     )
 
@@ -357,40 +344,9 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
             in
             ( model, Cmd.none, ImagePersisted op )
 
-        ThemeChanged ->
-            case model of
-                Reviewing current ->
-                    let
-                        ( frontModel, frontCmd, _ ) =
-                            EditableTypst.update EditableTypst.recompile current.front
 
-                        ( backModel, backCmd, _ ) =
-                            EditableTypst.update EditableTypst.recompile current.back
-                    in
-                    ( Reviewing { current | front = frontModel, back = backModel }
-                    , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
-                    , NoOutMsg
-                    )
-
-                _ ->
-                    ( model, Cmd.none, NoOutMsg )
-
-
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    case model of
-        Reviewing current ->
-            Sub.batch
-                [ Sub.map FrontMsg (EditableTypst.subscriptions current.front)
-                , Sub.map BackMsg (EditableTypst.subscriptions current.back)
-                ]
-
-        _ ->
-            Sub.none
-
-
-view : Int -> Bool -> Model -> Html Msg
-view deferDays isLoggedIn model =
+view : String -> Dict String String -> String -> Int -> Bool -> Model -> Html Msg
+view preamble knownImages theme deferDays isLoggedIn model =
     case model of
         NotAsked ->
             p [ class "review-empty" ] [ text "Loading..." ]
@@ -440,10 +396,10 @@ view deferDays isLoggedIn model =
                            )
                     )
                 , div [ class "review-card-area" ]
-                    (Html.map FrontMsg (EditableTypst.view current.front)
+                    (Html.map FrontMsg (EditableTypst.view (editableTypstConfig preamble knownImages theme) current.front)
                         :: (if current.revealed then
                                 [ hr [ class "review-divider" ] []
-                                , Html.map BackMsg (EditableTypst.view current.back)
+                                , Html.map BackMsg (EditableTypst.view (editableTypstConfig preamble knownImages theme) current.back)
                                 ]
 
                             else
@@ -451,6 +407,16 @@ view deferDays isLoggedIn model =
                            )
                     )
                 ]
+
+
+editableTypstConfig : String -> Dict String String -> String -> EditableTypst.ViewConfig
+editableTypstConfig preamble knownImages theme =
+    { preamble = preamble
+    , knownImages = knownImages
+    , theme = theme
+    , nextField = Nothing
+    , submitSelector = Nothing
+    }
 
 
 

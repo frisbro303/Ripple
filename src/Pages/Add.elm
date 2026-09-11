@@ -1,4 +1,4 @@
-module Add exposing (Model, Msg, OutMsg(..), editBack, editFront, init, subscriptions, themeChanged, update, view)
+module Pages.Add exposing (Model, Msg, OutMsg(..), editBack, editFront, init, update, view)
 
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, hr, p, text)
@@ -23,8 +23,8 @@ type alias Model =
 
 init : String -> Dict String String -> Model
 init preamble knownImages =
-    { front = EditableTypst.init "add-front" "Front" "i" preamble knownImages
-    , back = EditableTypst.init "add-back" "Back" "o" preamble knownImages
+    { front = EditableTypst.init "add-front" "Front" "i"
+    , back = EditableTypst.init "add-back" "Back" "o"
     , preamble = preamble
     , knownImages = knownImages
     , error = Nothing
@@ -38,7 +38,6 @@ type Msg
     | GotTimeForSubmit Time.Posix
     | CancelClicked
     | GotTimeForImageOp String String Time.Posix
-    | ThemeChanged
 
 
 type OutMsg
@@ -56,11 +55,6 @@ editFront =
 editBack : Msg
 editBack =
     BackMsg EditableTypst.requestFocus
-
-
-themeChanged : Msg
-themeChanged =
-    ThemeChanged
 
 
 newOpId : Time.Posix -> OpId
@@ -144,34 +138,31 @@ update msg model =
             in
             ( model, Cmd.none, ImagePersisted op )
 
-        ThemeChanged ->
-            let
-                ( frontModel, frontCmd, _ ) =
-                    EditableTypst.update EditableTypst.recompile model.front
 
-                ( backModel, backCmd, _ ) =
-                    EditableTypst.update EditableTypst.recompile model.back
-            in
-            ( { model | front = frontModel, back = backModel }
-            , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
-            , NoOutMsg
-            )
-
-
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    Sub.batch
-        [ Sub.map FrontMsg (EditableTypst.subscriptions model.front)
-        , Sub.map BackMsg (EditableTypst.subscriptions model.back)
-        ]
-
-
-view : Model -> Html Msg
-view model =
+view : String -> Model -> Html Msg
+view theme model =
     div [ class "review-card-area" ]
-        [ Html.map FrontMsg (EditableTypst.view model.front)
+        [ Html.map FrontMsg
+            (EditableTypst.view
+                { preamble = model.preamble
+                , knownImages = model.knownImages
+                , theme = theme
+                , nextField = Just "add-back"
+                , submitSelector = Nothing
+                }
+                model.front
+            )
         , hr [ class "review-divider" ] []
-        , Html.map BackMsg (EditableTypst.view model.back)
+        , Html.map BackMsg
+            (EditableTypst.view
+                { preamble = model.preamble
+                , knownImages = model.knownImages
+                , theme = theme
+                , nextField = Nothing
+                , submitSelector = Just "#add-submit-button"
+                }
+                model.back
+            )
         , case model.error of
             Just err ->
                 p [ class "note-editor-error" ] [ text err ]

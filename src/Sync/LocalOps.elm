@@ -4,6 +4,7 @@ import Http
 import Local.Db as Db
 import Ops.Op exposing (Op)
 import Ops.OpsLog as OpsLog exposing (OpsLog)
+import Set
 import Sync.Session exposing (Session)
 import Sync.Sync as Sync
 import Time
@@ -16,9 +17,24 @@ type alias Model =
 type Msg
     = LocalOpsLoaded OpsLog
     | SyncTick Time.Posix
+    | GotRemoteOpIds (Result Http.Error (List String))
     | GotRemoteOps (Result Http.Error OpsLog)
     | GotPushResult (Result Http.Error ())
     | ImportedOps OpsLog
+
+
+-- `fetchOps` (Sync.Sync) pulls the *entire* ops_log table — no filtering,
+-- no pagination — and ops can carry base64-encoded card images (AddImage),
+-- so polling it directly every 15s re-downloaded the whole history, images
+-- included, four times a minute for as long as the app stayed open. That's
+-- what blew through the Supabase egress quota. Every tick now fetches only
+-- the `id` column first (Sync.fetchOpIds) — tiny, no image data — and
+-- compares that set of ids against what's already known locally
+-- (OpsLog.idStrings); `fetchOps` only runs, to actually pull/push the
+-- difference, on the ticks where that comparison finds a real mismatch.
+-- Since a mismatch also covers "I have a local op the server doesn't yet",
+-- this still pushes this device's own new ops on the very next tick, same
+-- as before.
 
 
 syncIntervalMs : Float
@@ -61,6 +77,21 @@ update session msg model =
 
         SyncTick _ ->
             ( model, requestSync session, NoStatusChange )
+
+        GotRemoteOpIds (Ok remoteIds) ->
+            if Set.fromList remoteIds == OpsLog.idStrings model then
+                ( model, Cmd.none, SyncSucceeded )
+
+            else
+                case session of
+                    Just activeSession ->
+                        ( model, Sync.fetchOps activeSession GotRemoteOps, NoStatusChange )
+
+                    Nothing ->
+                        ( model, Cmd.none, NoStatusChange )
+
+        GotRemoteOpIds (Err error) ->
+            ( model, Cmd.none, classifyError error )
 
         GotRemoteOps (Ok remoteOps) ->
             case session of
@@ -140,7 +171,7 @@ requestSync : Maybe Session -> Cmd Msg
 requestSync maybeSession =
     case maybeSession of
         Just session ->
-            Sync.fetchOps session GotRemoteOps
+            Sync.fetchOpIds session GotRemoteOpIds
 
         Nothing ->
             Cmd.none

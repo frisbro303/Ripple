@@ -1,44 +1,4 @@
-const inkFor = (darkMode) => (darkMode ? "#e8e9ec" : "#1c1e21");
-
-function isDarkMode() {
-  const theme = document.documentElement.getAttribute("data-theme");
-  if (theme === "light") return false;
-  if (theme === "dark") return true;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
-}
-
-// Typst compiles to a fixed page width, so the resulting SVG has to be
-// generated at roughly the right size to begin with — image-scaling it
-// down afterward to fit a narrow phone screen just shrinks the text along
-// with it, which reads fine on a wide desktop window but becomes too small
-// to comfortably read on a phone. Measuring the container's rendered width
-// and converting it to points lets Typst re-lay-out the text at a size
-// that's actually right for the screen it's on.
-//
-// This deliberately queries the shared `.review-card-area` wrapper instead
-// of the specific field by requestId: a compile request is fired from
-// EditableTypst's `init`, in the same Elm update cycle that creates that
-// field's id attribute — Elm doesn't patch the id into the real DOM until
-// the next animation frame, so looking it up immediately would almost
-// always miss and silently fall back to the default width. `.review-box`
-// is always 100% of `.review-card-area`, and that wrapper (present on both
-// the Review and Add pages) is already on screen before any individual
-// card's fields are, so it's there to measure right away.
-function cardWidthPt() {
-  const area = document.querySelector(".review-card-area");
-  const widthPx = area ? area.clientWidth : 340.157480315 / 0.75;
-  return widthPx * 0.75; // CSS px -> pt (96dpi: 1pt = 4/3 px)
-}
-
-// A touch device is held closer and viewed at a higher pixel density than
-// a desktop monitor, so the same absolute point size that reads fine on
-// desktop feels small on a phone — this isn't something wrapping at the
-// right width fixes, the base size itself needs to be bigger. 14pt mirrors
-// the existing Rust-side default; 17pt matches iOS's own standard body
-// text size.
-function cardTextSizePt() {
-  return window.matchMedia("(pointer: coarse)").matches ? 17 : 14;
-}
+import { getFocusable } from "./Typst/code-field.js";
 
 // "i"/"o" are global shortcuts (Main.elm's handleAddKey/handleReviewKey)
 // that focus the front/back editor field as a side effect. Elm's
@@ -58,80 +18,26 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// Remembers each field's cursor position across a blur/refocus cycle, keyed
-// by textarea id. The textarea itself stays permanently mounted, so a
-// browser's own selectionStart/End would normally just survive a blur on
-// its own — but `focusField` below forces the cursor to the end every time
-// it focuses a field (needed the first time a field is opened, so typing
-// continues after any existing content rather than landing at position 0),
-// which was overwriting that natural persistence on every subsequent
-// re-entry too, so the cursor always "respawned" at the end instead of
-// wherever the user had actually left it.
-const lastSelection = new Map();
-
-document.addEventListener(
-  "blur",
-  (event) => {
-    const el = event.target;
-    if (el instanceof HTMLTextAreaElement && el.classList.contains("note-editor-field")) {
-      lastSelection.set(el.id, { start: el.selectionStart, end: el.selectionEnd });
-    }
-  },
-  true
-);
+// Non-editor, non-input chrome shouldn't show the browser's native context
+// menu; editor fields (<typst-code-field>) handle their own context menu
+// (opening the image picker) directly, and plain inputs keep their native
+// menu (e.g. for cut/copy/paste in a number field).
+document.addEventListener("contextmenu", (event) => {
+  const el = event.target;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+  event.preventDefault();
+});
 
 export function setupTauri(app) {
-  app.ports.compileTypstPort.subscribe(async ({ requestId, source: rawTypst, preamble, images }) => {
-    const [status, output] = await window.__TAURI__.core.invoke("render_typst", {
-      rawTypst,
-      ink: inkFor(isDarkMode()),
-      preamble,
-      images,
-      widthPt: cardWidthPt(),
-      textSizePt: cardTextSizePt(),
-    });
-    app.ports.rawTypstCompiledPort.send([requestId, status, output]);
-  });
-
-  app.ports.highlightTypstPort.subscribe(async ([requestId, source]) => {
-    const tree = await window.__TAURI__.core.invoke("highlight_typst", { source });
-    app.ports.typstHighlightedPort.send([requestId, tree]);
-  });
-
   app.ports.focusField.subscribe((id) => {
-    // Called synchronously (no requestAnimationFrame/setTimeout) so this
-    // stays within the original tap's call stack — on iOS, .focus() only
-    // raises the on-screen keyboard when it runs inside that same
-    // synchronous window. This relies on the target textarea already
-    // existing in the DOM (EditableTypst keeps it permanently mounted,
-    // toggling visibility via CSS instead of conditionally rendering it)
-    // rather than waiting for Elm to patch it into existence.
-    //
-    // Existing isn't enough on its own, though: the textarea is hidden via
-    // `display: none` (through the `.review-box--editing` class, added by
-    // Elm's own re-render) until editing actually starts, and a
-    // `display: none` element can't receive focus at all — calling
-    // `.focus()` on it is a silent no-op. Elm's virtual-dom patch that adds
-    // that class is also deferred to the next animation frame, same as
-    // element creation would be, so relying on it to have already run
-    // reintroduces the exact race this function exists to avoid (most
-    // visible when entering edit mode via a keyboard shortcut rather than
-    // clicking directly on the field, since nothing else forces a
-    // synchronous re-render first). Adding the class here directly makes
-    // the field visible/focusable immediately; Elm adds the same class
-    // moments later regardless, which is a harmless no-op by then.
-    const el = document.getElementById(id);
-    if (el) {
-      const box = el.closest(".review-box");
-      if (box) box.classList.add("review-box--editing");
-      el.focus();
-      const saved = lastSelection.get(id);
-      if (saved && saved.end <= el.value.length) {
-        el.setSelectionRange(saved.start, saved.end);
-      } else {
-        el.setSelectionRange(el.value.length, el.value.length);
-      }
-    }
+    // Looked up in a registry populated at real-connect time (see
+    // Typst/code-field.js), so this can never be stale or missing because
+    // Elm hasn't patched the DOM yet — and `.focusField()` itself is fully
+    // synchronous (no rAF/setTimeout/await), so this stays within the
+    // original keydown's call stack, which iOS requires to raise the
+    // on-screen keyboard.
+    const el = getFocusable(id);
+    if (el && typeof el.focusField === "function") el.focusField();
   });
 
   app.ports.setPort.subscribe(async ({ key, value }) => {
