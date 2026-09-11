@@ -1,8 +1,9 @@
-module Ops.Op exposing (Op, OpId(..), OpKind(..), decoder, encoder)
+module Ops.Op exposing (Op, OpId(..), OpKind(..), decoder, encoder, newId)
 
 import Iso8601
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Random
 import Sea.Card exposing (CardId)
 import Sea.FSRS exposing (Rating(..))
 import Time exposing (Posix)
@@ -14,6 +15,13 @@ type alias Op =
     , timeStamp : Posix
     , opKind : OpKind
     }
+
+
+newId : Posix -> OpId
+newId now =
+    Random.step UUID.generator (Random.initialSeed (Time.posixToMillis now))
+        |> Tuple.first
+        |> OpId
 
 
 type OpId

@@ -30,10 +30,6 @@ type alias State =
     }
 
 
-{-| The hour (UTC) at which a new day begins, for the purposes of counting
-elapsed days between reviews (FSRS operates on whole calendar days, not raw
-durations) — matches Anki's default rollover hour.
--}
 rolloverHour : Int
 rolloverHour =
     4
@@ -49,19 +45,36 @@ elapsedDays from to =
     Date.diff Date.Days (dateOf from) (dateOf to)
 
 
-{-| FSRS-6 default parameters, w0..w20. See <https://github.com/open-spaced-repetition/awesome-fsrs/wiki/The-Algorithm>.
--}
-w : Array Float
-w =
+fsrsWeights : Array Float
+fsrsWeights =
     Array.fromList
-        [ 0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666
-        , 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658
+        [ 0.212
+        , 1.2931
+        , 2.3065
+        , 8.2956
+        , 6.4133
+        , 0.8334
+        , 3.0194
+        , 0.001
+        , 1.8722
+        , 0.1666
+        , 0.796
+        , 1.4835
+        , 0.0614
+        , 0.2629
+        , 1.6483
+        , 0.6014
+        , 1.8729
+        , 0.5425
+        , 0.0912
+        , 0.0658
         , 0.1542
         ]
 
 
-p i =
-    Array.get i w |> Maybe.withDefault 0
+weight : Int -> Float
+weight i =
+    Array.get i fsrsWeights |> Maybe.withDefault 0
 
 
 defaultDesiredRetention : Float
@@ -70,7 +83,7 @@ defaultDesiredRetention =
 
 
 decay =
-    -(p 20)
+    -(weight 20)
 
 
 factor =
@@ -79,10 +92,17 @@ factor =
 
 ratingNumber rating =
     case rating of
-        Again -> 1
-        Hard -> 2
-        Good -> 3
-        Easy -> 4
+        Again ->
+            1
+
+        Hard ->
+            2
+
+        Good ->
+            3
+
+        Easy ->
+            4
 
 
 retrievability elapsed stability =
@@ -90,15 +110,11 @@ retrievability elapsed stability =
 
 
 initialStability rating =
-    p (round (ratingNumber rating) - 1)
+    weight (round (ratingNumber rating) - 1)
 
 
-{-| Unclamped — used as the mean-reversion target in `nextDifficulty`, which
-per the reference FSRS-6 implementation pulls toward this raw value (not the
-[1, 10]-clamped one used when a brand new card is first rated).
--}
 rawInitialDifficulty rating =
-    p 4 - e ^ (p 5 * (ratingNumber rating - 1)) + 1
+    weight 4 - e ^ (weight 5 * (ratingNumber rating - 1)) + 1
 
 
 initialDifficulty rating =
@@ -108,15 +124,15 @@ initialDifficulty rating =
 nextDifficulty difficulty rating =
     let
         damped =
-            difficulty - p 6 * (ratingNumber rating - 3) * (10 - difficulty) / 9
+            difficulty - weight 6 * (ratingNumber rating - 3) * (10 - difficulty) / 9
     in
-    clamp 1 10 (p 7 * rawInitialDifficulty Easy + (1 - p 7) * damped)
+    clamp 1 10 (weight 7 * rawInitialDifficulty Easy + (1 - weight 7) * damped)
 
 
 shortTermStability stability rating =
     let
         multiplier =
-            e ^ (p 17 * (ratingNumber rating - 3 + p 18)) * stability ^ -(p 19)
+            e ^ (weight 17 * (ratingNumber rating - 3 + weight 18)) * stability ^ -(weight 19)
     in
     stability
         * (if rating == Again then
@@ -131,24 +147,24 @@ recallStability difficulty stability r rating =
     let
         bonus =
             if rating == Hard then
-                p 15
+                weight 15
 
             else if rating == Easy then
-                p 16
+                weight 16
 
             else
                 1
     in
-    stability * (e ^ p 8 * (11 - difficulty) * stability ^ -(p 9) * (e ^ (p 10 * (1 - r)) - 1) * bonus + 1)
+    stability * (e ^ weight 8 * (11 - difficulty) * stability ^ -(weight 9) * (e ^ (weight 10 * (1 - r)) - 1) * bonus + 1)
 
 
 forgetStability difficulty stability r =
     let
         newStability =
-            p 11 * difficulty ^ -(p 12) * ((stability + 1) ^ p 13 - 1) * e ^ (p 14 * (1 - r))
+            weight 11 * difficulty ^ -(weight 12) * ((stability + 1) ^ weight 13 - 1) * e ^ (weight 14 * (1 - r))
 
         newStabilityMin =
-            stability / e ^ (p 17 * p 18)
+            stability / e ^ (weight 17 * weight 18)
     in
     min newStability newStabilityMin
 
@@ -166,9 +182,6 @@ initialState now =
     { due = now, stability = 0, difficulty = 0, lastReview = now }
 
 
-{-| A `difficulty` of 0 marks a card that has never been reviewed, since a
-reviewed card's difficulty is always clamped to the range [1, 10].
--}
 isNew state =
     state.difficulty == 0
 

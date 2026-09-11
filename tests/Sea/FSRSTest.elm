@@ -11,13 +11,6 @@ addDays days t =
     Time.millisToPosix (Time.posixToMillis t + days * 86400000)
 
 
-{-| Reference case ported from fsrs-rs's `test_memory_state` (inference.rs),
-which exercises the same FSRS-6 default weights this module hard-codes. Six
-reviews — Again, then five Good — separated by 0, 0, 1, 3, 8, 21 elapsed
-days should land on stability ≈ 53.62691 and difficulty ≈ 6.3574867.
-
-<https://github.com/open-spaced-repetition/fsrs-rs/blob/main/src/inference.rs>
--}
 suite : Test
 suite =
     describe "FSRS.review against the fsrs-rs reference implementation"

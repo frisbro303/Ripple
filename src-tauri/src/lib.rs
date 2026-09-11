@@ -36,7 +36,6 @@ fn render_typst(
             attachments: &attachments,
             width_pt,
             text_size_pt,
-            ..RenderOptions::default()
         },
     ) {
         Ok(svg) => (0, svg),

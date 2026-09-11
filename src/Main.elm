@@ -19,7 +19,6 @@ import Pages.Add as Add
 import Pages.Review as Review
 import Pages.Settings as Settings
 import Pages.Stats as Stats
-import Random
 import Sea.FSRS exposing (Rating(..))
 import Sea.Sea as Sea
 import Svg.Attributes exposing (height, width)
@@ -28,9 +27,7 @@ import Sync.LocalOps as LocalOps
 import Sync.Session as Session exposing (Session)
 import Sync.SessionLifecycle as SessionLifecycle
 import Task
-import Theme
 import Time
-import UUID
 
 
 type alias Model =
@@ -246,13 +243,6 @@ applySyncStatus status model =
             ( { model | syncError = Nothing }, Cmd.none )
 
 
-newOpId : Time.Posix -> Op.OpId
-newOpId now =
-    Random.step UUID.generator (Random.initialSeed (Time.posixToMillis now))
-        |> Tuple.first
-        |> Op.OpId
-
-
 updateInner : Msg -> Model -> ( Model, Cmd Msg )
 updateInner msg model =
     case msg of
@@ -323,6 +313,9 @@ updateInner msg model =
                 ( settingsModel, settingsCmd, syncUpdate ) =
                     Settings.update settingsMsg model.settings
 
+                themeChanged =
+                    settingsModel.theme /= model.settings.theme
+
                 opCmd =
                     case syncUpdate of
                         Settings.PreambleCommitted preamble ->
@@ -341,15 +334,32 @@ updateInner msg model =
 
                         Settings.NoSyncUpdate ->
                             Cmd.none
+
+                modelAfterSettings =
+                    { model | settings = settingsModel }
+
+                ( modelAfterTheme, themeCmd ) =
+                    if themeChanged then
+                        let
+                            ( modelAfterAdd, addCmd ) =
+                                handleAddMsg Add.themeChanged modelAfterSettings
+
+                            ( modelAfterReview, reviewCmd ) =
+                                handleReviewMsg Review.themeChanged modelAfterAdd
+                        in
+                        ( modelAfterReview, Cmd.batch [ addCmd, reviewCmd ] )
+
+                    else
+                        ( modelAfterSettings, Cmd.none )
             in
-            ( { model | settings = settingsModel }
-            , Cmd.batch [ Cmd.map SettingsMsg settingsCmd, opCmd ]
+            ( modelAfterTheme
+            , Cmd.batch [ Cmd.map SettingsMsg settingsCmd, opCmd, themeCmd ]
             )
 
         GotTimeForPreambleOp preamble now ->
             let
                 op =
-                    { id = newOpId now, timeStamp = now, opKind = Op.SetPreamble preamble }
+                    { id = Op.newId now, timeStamp = now, opKind = Op.SetPreamble preamble }
 
                 ( localOpsModel, cmd ) =
                     LocalOps.insertNewOp op model.localOps
@@ -359,7 +369,7 @@ updateInner msg model =
         GotTimeForRetentionOp retentionPercent now ->
             let
                 op =
-                    { id = newOpId now, timeStamp = now, opKind = Op.SetRetention retentionPercent }
+                    { id = Op.newId now, timeStamp = now, opKind = Op.SetRetention retentionPercent }
 
                 ( localOpsModel, cmd ) =
                     LocalOps.insertNewOp op model.localOps
@@ -436,7 +446,7 @@ handleReviewMsg reviewMsg model =
             Sea.fromOpsLog (Settings.desiredRetention model.settings) model.localOps
 
         ( reviewModel, reviewCmd, outMsg ) =
-            Review.update (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) model.localOps sea reviewMsg model.review
+            Review.update (Settings.typstPreamble model.settings) (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) (latestImages model.localOps) model.localOps sea reviewMsg model.review
 
         ( afterOutModel, outCmd ) =
             case outMsg of
@@ -481,10 +491,6 @@ togglePage page model =
             else
                 page
 
-        -- Toggling Add off via its own icon/shortcut is how Add is
-        -- cancelled, so it discards the draft — but switching away to a
-        -- *different* page (Settings, Stats, Account) leaves it untouched,
-        -- so it's still there if you come back to Add later.
         newAdd =
             if togglingOff && model.page == Page.Add then
                 Add.init (Settings.typstPreamble model.settings) (latestImages model.localOps)
@@ -723,18 +729,10 @@ pageContent : Model -> Html Msg
 pageContent model =
     case model.page of
         Page.Review ->
-            Html.map ReviewMsg
-                (Review.view
-                    (Settings.typstPreamble model.settings)
-                    (latestImages model.localOps)
-                    (Theme.toString model.settings.theme)
-                    (Settings.deferDays model.settings)
-                    (model.session /= Nothing)
-                    model.review
-                )
+            Html.map ReviewMsg (Review.view (Settings.deferDays model.settings) (model.session /= Nothing) model.review)
 
         Page.Add ->
-            Html.map AddMsg (Add.view (Theme.toString model.settings.theme) model.add)
+            Html.map AddMsg (Add.view model.add)
 
         Page.Stats ->
             div [ class "stats-card" ] [ Html.map StatsMsg (Stats.view model.stats) ]
@@ -789,6 +787,9 @@ subscriptions model =
     Sub.batch
         [ Store.loaded StoreLoaded
         , Sub.map LocalOpsMsg (LocalOps.subscriptions model.session)
+        , Sub.map AddMsg (Add.subscriptions model.add)
+        , Sub.map ReviewMsg (Review.subscriptions model.review)
+        , Sub.map SettingsMsg (Settings.subscriptions model.settings)
         , Data.importLoaded GotImportedJson
         , Browser.Events.onKeyDown keyEventDecoder |> Sub.map KeyPressed
         ]

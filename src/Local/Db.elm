@@ -38,12 +38,11 @@ clearOps =
     clearOpsPort ()
 
 
-opsLoaded : (OpsLog -> msg) -> Sub msg
+opsLoaded : (Result Decode.Error OpsLog -> msg) -> Sub msg
 opsLoaded toMsg =
     opsLoadedPort
         (\value ->
             Decode.decodeValue (Decode.list Op.decoder) value
-                |> Result.withDefault []
-                |> OpsLog.fromList
+                |> Result.map OpsLog.fromList
                 |> toMsg
         )

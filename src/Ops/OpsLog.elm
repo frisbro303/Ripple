@@ -1,4 +1,4 @@
-module Ops.OpsLog exposing (OpsLog, diff, emptyOpsLog, foldl, fromList, idStrings, insert, merge, size, toList)
+module Ops.OpsLog exposing (OpsLog, diff, emptyOpsLog, foldl, fromList, idStrings, insert, merge, toList)
 
 import Dict exposing (Dict)
 import Ops.Op exposing (Op, OpId(..))
@@ -40,11 +40,6 @@ toList (OpsLog dict) =
     Dict.values dict
 
 
-size : OpsLog -> Int
-size (OpsLog dict) =
-    Dict.size dict
-
-
 foldl : (Op -> a -> a) -> a -> OpsLog -> a
 foldl step initial (OpsLog dict) =
     Dict.foldl (\_ op acc -> step op acc) initial dict
@@ -60,14 +55,15 @@ diff (OpsLog a) (OpsLog b) =
     OpsLog (Dict.diff a b)
 
 
--- Used to cheaply compare "do these two logs have the same ops" (e.g.
--- against a server-side id-only probe) without needing to look at, let
--- alone transfer, each op's actual content — a set of UUID strings is much
--- smaller and easier to diff than the full ops themselves.
-
-
 idStrings : OpsLog -> Set String
 idStrings (OpsLog dict) =
     Dict.values dict
-        |> List.map (\op -> let (OpId uuid) = op.id in UUID.toString uuid)
+        |> List.map
+            (\op ->
+                let
+                    (OpId uuid) =
+                        op.id
+                in
+                UUID.toString uuid
+            )
         |> Set.fromList

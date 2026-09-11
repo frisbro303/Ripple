@@ -1,10 +1,10 @@
-module Pages.Add exposing (Model, Msg, OutMsg(..), editBack, editFront, init, update, view)
+module Pages.Add exposing (Model, Msg, OutMsg(..), editBack, editFront, init, subscriptions, themeChanged, update, view)
 
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, hr, p, text)
 import Html.Attributes exposing (class, id)
 import Html.Events exposing (onClick)
-import Ops.Op exposing (Op, OpId(..), OpKind(..))
+import Ops.Op as Op exposing (Op, OpId(..), OpKind(..))
 import Random
 import Task
 import Time
@@ -23,8 +23,8 @@ type alias Model =
 
 init : String -> Dict String String -> Model
 init preamble knownImages =
-    { front = EditableTypst.init "add-front" "Front" "i"
-    , back = EditableTypst.init "add-back" "Back" "o"
+    { front = EditableTypst.init "add-front" "Front" "i" True preamble knownImages
+    , back = EditableTypst.init "add-back" "Back" "o" True preamble knownImages
     , preamble = preamble
     , knownImages = knownImages
     , error = Nothing
@@ -38,6 +38,7 @@ type Msg
     | GotTimeForSubmit Time.Posix
     | CancelClicked
     | GotTimeForImageOp String String Time.Posix
+    | ThemeChanged
 
 
 type OutMsg
@@ -57,11 +58,9 @@ editBack =
     BackMsg EditableTypst.requestFocus
 
 
-newOpId : Time.Posix -> OpId
-newOpId now =
-    Random.step UUID.generator (Random.initialSeed (Time.posixToMillis now))
-        |> Tuple.first
-        |> OpId
+themeChanged : Msg
+themeChanged =
+    ThemeChanged
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -72,30 +71,44 @@ update msg model =
                 ( frontModel, cmd, outMsg ) =
                     EditableTypst.update frontMsg model.front
 
-                imageCmd =
-                    case outMsg of
-                        EditableTypst.ImageAdded imgId data ->
-                            Task.perform (GotTimeForImageOp imgId data) Time.now
-
-                        _ ->
-                            Cmd.none
+                modelAfterFront =
+                    { model | front = frontModel }
             in
-            ( { model | front = frontModel }, Cmd.batch [ Cmd.map FrontMsg cmd, imageCmd ], NoOutMsg )
+            case outMsg of
+                EditableTypst.ImageAdded imgId data ->
+                    ( modelAfterFront, Cmd.batch [ Cmd.map FrontMsg cmd, Task.perform (GotTimeForImageOp imgId data) Time.now ], NoOutMsg )
+
+                EditableTypst.ShiftEnterChain ->
+                    let
+                        ( modelAfterChain, chainCmd, _ ) =
+                            update editBack modelAfterFront
+                    in
+                    ( modelAfterChain, Cmd.batch [ Cmd.map FrontMsg cmd, chainCmd ], NoOutMsg )
+
+                _ ->
+                    ( modelAfterFront, Cmd.map FrontMsg cmd, NoOutMsg )
 
         BackMsg backMsg ->
             let
                 ( backModel, cmd, outMsg ) =
                     EditableTypst.update backMsg model.back
 
-                imageCmd =
-                    case outMsg of
-                        EditableTypst.ImageAdded imgId data ->
-                            Task.perform (GotTimeForImageOp imgId data) Time.now
-
-                        _ ->
-                            Cmd.none
+                modelAfterBack =
+                    { model | back = backModel }
             in
-            ( { model | back = backModel }, Cmd.batch [ Cmd.map BackMsg cmd, imageCmd ], NoOutMsg )
+            case outMsg of
+                EditableTypst.ImageAdded imgId data ->
+                    ( modelAfterBack, Cmd.batch [ Cmd.map BackMsg cmd, Task.perform (GotTimeForImageOp imgId data) Time.now ], NoOutMsg )
+
+                EditableTypst.ShiftEnterChain ->
+                    let
+                        ( modelAfterSubmit, submitCmd, submitOut ) =
+                            update SubmitClicked modelAfterBack
+                    in
+                    ( modelAfterSubmit, Cmd.batch [ Cmd.map BackMsg cmd, submitCmd ], submitOut )
+
+                _ ->
+                    ( modelAfterBack, Cmd.map BackMsg cmd, NoOutMsg )
 
         SubmitClicked ->
             if EditableTypst.isBlank model.front || EditableTypst.isBlank model.back then
@@ -131,38 +144,41 @@ update msg model =
         GotTimeForImageOp imgId data now ->
             let
                 op =
-                    { id = newOpId now
+                    { id = Op.newId now
                     , timeStamp = now
                     , opKind = AddImage { id = imgId, data = data }
                     }
             in
             ( model, Cmd.none, ImagePersisted op )
 
+        ThemeChanged ->
+            let
+                ( frontModel, frontCmd, _ ) =
+                    EditableTypst.update EditableTypst.recompile model.front
 
-view : String -> Model -> Html Msg
-view theme model =
+                ( backModel, backCmd, _ ) =
+                    EditableTypst.update EditableTypst.recompile model.back
+            in
+            ( { model | front = frontModel, back = backModel }
+            , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
+            , NoOutMsg
+            )
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.batch
+        [ Sub.map FrontMsg (EditableTypst.subscriptions model.front)
+        , Sub.map BackMsg (EditableTypst.subscriptions model.back)
+        ]
+
+
+view : Model -> Html Msg
+view model =
     div [ class "review-card-area" ]
-        [ Html.map FrontMsg
-            (EditableTypst.view
-                { preamble = model.preamble
-                , knownImages = model.knownImages
-                , theme = theme
-                , nextField = Just "add-back"
-                , submitSelector = Nothing
-                }
-                model.front
-            )
+        [ Html.map FrontMsg (EditableTypst.view model.front)
         , hr [ class "review-divider" ] []
-        , Html.map BackMsg
-            (EditableTypst.view
-                { preamble = model.preamble
-                , knownImages = model.knownImages
-                , theme = theme
-                , nextField = Nothing
-                , submitSelector = Just "#add-submit-button"
-                }
-                model.back
-            )
+        , Html.map BackMsg (EditableTypst.view model.back)
         , case model.error of
             Just err ->
                 p [ class "note-editor-error" ] [ text err ]

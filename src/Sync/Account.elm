@@ -1,4 +1,4 @@
-module Sync.Account exposing (Model, Msg(..), SessionUpdate(..), init, refresh, update, view)
+module Sync.Account exposing (Model, Msg, SessionUpdate(..), init, refresh, update, view)
 
 import Html exposing (Html, button, div, form, h3, input, p, span, text)
 import Html.Attributes exposing (class, placeholder, required, type_, value)
@@ -262,39 +262,43 @@ update msg model =
             ( init, Cmd.none, SessionCleared )
 
 
-login : String -> String -> Cmd Msg
-login email password =
+authRequest : { method : String, path : String, accessToken : Maybe String, body : Encode.Value, expect : Http.Expect msg } -> Cmd msg
+authRequest { method, path, accessToken, body, expect } =
     Http.request
-        { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/token?grant_type=password"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "email", Encode.string email )
-                    , ( "password", Encode.string password )
-                    ]
-                )
-        , expect = Http.expectStringResponse GotLoginResponse handleLoginResponse
+        { method = method
+        , headers =
+            Http.header "apikey" anonKey
+                :: (accessToken
+                        |> Maybe.map (\token -> [ Http.header "Authorization" ("Bearer " ++ token) ])
+                        |> Maybe.withDefault []
+                   )
+        , url = supabaseUrl ++ "/auth/v1" ++ path
+        , body = Http.jsonBody body
+        , expect = expect
         , timeout = Nothing
         , tracker = Nothing
         }
 
 
+login : String -> String -> Cmd Msg
+login email password =
+    authRequest
+        { method = "POST"
+        , path = "/token?grant_type=password"
+        , accessToken = Nothing
+        , body = Encode.object [ ( "email", Encode.string email ), ( "password", Encode.string password ) ]
+        , expect = Http.expectStringResponse GotLoginResponse handleLoginResponse
+        }
+
+
 refresh : String -> Cmd Msg
 refresh refreshToken =
-    Http.request
+    authRequest
         { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/token?grant_type=refresh_token"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "refresh_token", Encode.string refreshToken ) ]
-                )
+        , path = "/token?grant_type=refresh_token"
+        , accessToken = Nothing
+        , body = Encode.object [ ( "refresh_token", Encode.string refreshToken ) ]
         , expect = Http.expectStringResponse GotRefreshResponse handleLoginResponse
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
@@ -394,132 +398,88 @@ orElse fallback maybeValue =
 
 signup : String -> String -> Cmd Msg
 signup email password =
-    Http.request
+    authRequest
         { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/signup"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "email", Encode.string email )
-                    , ( "password", Encode.string password )
-                    ]
-                )
+        , path = "/signup"
+        , accessToken = Nothing
+        , body = Encode.object [ ( "email", Encode.string email ), ( "password", Encode.string password ) ]
         , expect = Http.expectStringResponse GotSignupResponse handleUnitResponse
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
 verify : String -> String -> Cmd Msg
 verify email code =
-    Http.request
+    authRequest
         { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/verify"
+        , path = "/verify"
+        , accessToken = Nothing
         , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "type", Encode.string "signup" )
-                    , ( "email", Encode.string email )
-                    , ( "token", Encode.string code )
-                    ]
-                )
+            Encode.object
+                [ ( "type", Encode.string "signup" )
+                , ( "email", Encode.string email )
+                , ( "token", Encode.string code )
+                ]
         , expect = Http.expectJson GotVerifyResponse Session.decoder
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
 resend : String -> Cmd Msg
 resend email =
-    Http.request
+    authRequest
         { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/resend"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "type", Encode.string "signup" )
-                    , ( "email", Encode.string email )
-                    ]
-                )
+        , path = "/resend"
+        , accessToken = Nothing
+        , body = Encode.object [ ( "type", Encode.string "signup" ), ( "email", Encode.string email ) ]
         , expect = Http.expectStringResponse GotResendResponse handleUnitResponse
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
 recover : String -> Cmd Msg
 recover email =
-    Http.request
+    authRequest
         { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/recover"
-        , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
+        , path = "/recover"
+        , accessToken = Nothing
+        , body = Encode.object [ ( "email", Encode.string email ) ]
         , expect = Http.expectStringResponse GotRecoverResponse handleUnitResponse
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
 verifyRecovery : String -> String -> Cmd Msg
 verifyRecovery email code =
-    Http.request
+    authRequest
         { method = "POST"
-        , headers = [ Http.header "apikey" anonKey ]
-        , url = supabaseUrl ++ "/auth/v1/verify"
+        , path = "/verify"
+        , accessToken = Nothing
         , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "type", Encode.string "recovery" )
-                    , ( "email", Encode.string email )
-                    , ( "token", Encode.string code )
-                    ]
-                )
+            Encode.object
+                [ ( "type", Encode.string "recovery" )
+                , ( "email", Encode.string email )
+                , ( "token", Encode.string code )
+                ]
         , expect = Http.expectJson GotRecoveryVerifyResponse Session.decoder
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
 updatePassword : String -> String -> Cmd Msg
 updatePassword accessToken newPassword =
-    Http.request
+    authRequest
         { method = "PUT"
-        , headers =
-            [ Http.header "apikey" anonKey
-            , Http.header "Authorization" ("Bearer " ++ accessToken)
-            ]
-        , url = supabaseUrl ++ "/auth/v1/user"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "password", Encode.string newPassword ) ]
-                )
+        , path = "/user"
+        , accessToken = Just accessToken
+        , body = Encode.object [ ( "password", Encode.string newPassword ) ]
         , expect = Http.expectStringResponse GotUpdatePasswordResponse handleUnitResponse
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
 updateEmail : String -> String -> Cmd Msg
 updateEmail accessToken newEmail =
-    Http.request
+    authRequest
         { method = "PUT"
-        , headers =
-            [ Http.header "apikey" anonKey
-            , Http.header "Authorization" ("Bearer " ++ accessToken)
-            ]
-        , url = supabaseUrl ++ "/auth/v1/user"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "email", Encode.string newEmail ) ]
-                )
+        , path = "/user"
+        , accessToken = Just accessToken
+        , body = Encode.object [ ( "email", Encode.string newEmail ) ]
         , expect = Http.expectStringResponse GotUpdateEmailResponse handleUnitResponse
-        , timeout = Nothing
-        , tracker = Nothing
         }
 
 
@@ -583,7 +543,7 @@ changeEmailForm session model =
                 []
             , button [ class "button-primary", type_ "submit" ] [ text "Update" ]
             ]
-        , accountErrorView model.emailError
+        , errorMessage "account-error" model.emailError
         , if model.emailSaved then
             p [ class "account-hint" ] [ text "Check your new email to confirm the change" ]
 
@@ -621,23 +581,13 @@ changePasswordForm session model =
                 ]
             , button [ class "button-primary", type_ "submit" ] [ text "Update" ]
             ]
-        , accountErrorView model.passwordError
+        , errorMessage "account-error" model.passwordError
         , if model.passwordSaved then
             p [ class "account-hint" ] [ text "Password updated" ]
 
           else
             text ""
         ]
-
-
-accountErrorView : Maybe String -> Html Msg
-accountErrorView error =
-    case error of
-        Just err ->
-            p [ class "account-error" ] [ text err ]
-
-        Nothing ->
-            text ""
 
 
 authForm : Model -> Html Msg
@@ -699,7 +649,7 @@ authForm model =
                     else
                         []
                    )
-                ++ [ errorView model.error
+                ++ [ errorMessage "auth-error" model.error
                    , button [ class "button-primary", type_ "submit" ] [ text modeLabel ]
                    ]
             )
@@ -735,7 +685,7 @@ forgotPasswordForm model =
                 , required True
                 ]
                 []
-            , errorView model.error
+            , errorMessage "auth-error" model.error
             , button [ class "button-primary", type_ "submit" ] [ text "Send reset code" ]
             ]
         , button [ class "auth-switch", onClick BackToLoginClicked ] [ text "Back to log in" ]
@@ -757,7 +707,7 @@ recoveryCodeForm model =
                 , required True
                 ]
                 []
-            , errorView model.error
+            , errorMessage "auth-error" model.error
             , button [ class "button-primary", type_ "submit" ] [ text "Verify" ]
             ]
         , button [ class "auth-switch", onClick SendRecoveryClicked ] [ text "Resend code" ]
@@ -780,18 +730,18 @@ verifyForm model =
                 , required True
                 ]
                 []
-            , errorView model.error
+            , errorMessage "auth-error" model.error
             , button [ class "button-primary", type_ "submit" ] [ text "Verify" ]
             ]
         , button [ class "auth-switch", onClick ResendClicked ] [ text "Resend code" ]
         ]
 
 
-errorView : Maybe String -> Html Msg
-errorView error =
+errorMessage : String -> Maybe String -> Html Msg
+errorMessage className error =
     case error of
         Just err ->
-            p [ class "auth-error" ] [ text err ]
+            p [ class className ] [ text err ]
 
         Nothing ->
             text ""

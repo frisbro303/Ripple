@@ -4,14 +4,6 @@ import Sea.FSRS exposing (Rating(..))
 import Time exposing (Posix)
 
 
-{-| Number of consecutive Good ratings needed to graduate a card out of the
-learning queue and into FSRS-6 scheduling. Cards resurface immediately
-(not after some fixed delay) as long as they're still learning, rather than
-making you wait a fixed number of minutes — a graduated card already can't
-come back same-day (`nextIntervalDays` floors at 1 day), so the only thing
-this queue is protecting against is FSRS-6's stability model, which is fit
-on day-scale gaps and has no opinion on sub-day scheduling.
--}
 totalSteps : Int
 totalSteps =
     2

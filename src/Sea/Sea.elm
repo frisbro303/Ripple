@@ -1,4 +1,4 @@
-module Sea.Sea exposing (Sea, applyOp, emptySea, fromOpsLog, getCard, getDue, insertCard, introducedCardIds, isIntroduced, newCardsToday, nextDue, removeCard, size, toList, updateCard)
+module Sea.Sea exposing (Sea, fromOpsLog, introducedCardIds, isIntroduced, newCardsToday, nextDue, toList)
 
 import Dict exposing (Dict)
 import Ops.Op exposing (Op, OpKind(..))
@@ -19,11 +19,6 @@ emptySea =
     Sea { cards = Dict.empty }
 
 
-size : Sea -> Int
-size (Sea { cards }) =
-    Dict.size cards
-
-
 toList : Sea -> List Card.Card
 toList (Sea { cards }) =
     Dict.values cards
@@ -36,14 +31,6 @@ getDue now (Sea { cards }) =
         |> List.filter (Card.isDue now)
 
 
-{-| The daily new-card limit caps how many cards get *introduced* per day —
-it's not a cap on how many times an already-introduced card is allowed to
-reappear while it's still cycling through its learning steps. So the gate
-below only ever excludes truly-untouched cards; a card that's mid-learning
-(has at least one review, per `introducedCardIds`) stays pickable regardless
-of whether today's new-card allowance has been used up, since blocking it
-would just strand it mid-steps until tomorrow.
--}
 nextDue : Int -> Posix -> OpsLog -> Sea -> Maybe Card.Card
 nextDue dailyNewLimit now opsLog sea =
     let
@@ -59,10 +46,6 @@ nextDue dailyNewLimit now opsLog sea =
         |> List.head
 
 
-{-| Card ids with at least one `ReviewCard` op ever submitted for them —
-i.e. cards that have been introduced, whether or not they've graduated out
-of learning yet.
--}
 introducedCardIds : OpsLog -> Set.Set String
 introducedCardIds opsLog =
     OpsLog.foldl
@@ -187,11 +170,6 @@ applyOp desiredRetention op sea =
             sea
 
 
-{-| `desiredRetention` (0-1) governs how far out newly-scheduled reviews are
-spaced — since it's a live setting rather than something recorded per-op,
-replaying history with a different value reschedules every card's next due
-date accordingly (matches how the reference app's settings behave).
--}
 fromOpsLog : Float -> OpsLog -> Sea
 fromOpsLog desiredRetention opsLog =
     OpsLog.foldl (applyOp desiredRetention) emptySea opsLog

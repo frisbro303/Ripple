@@ -1,24 +1,15 @@
-module Sea.Card exposing (..)
-
-import UUID exposing (UUID)
-import Time exposing (Posix)
+module Sea.Card exposing (Card, CardId, defer, isDue, new, resetToLearning, review)
 
 import Sea.FSRS as FSRS exposing (Rating)
 import Sea.Learning as Learning
+import Time exposing (Posix)
+import UUID exposing (UUID)
 
 
 type alias CardId =
     UUID
 
 
-{-| `learningStep` tracks a card's position in the short-term learning queue
-(see `Sea.Learning`) — `Just n` means the card hasn't graduated into FSRS-6
-scheduling yet and is on step `n`; `Nothing` means it's a normal FSRS-scheduled
-card. While learning, `fsrs.due` holds the next same-session re-show time and
-`fsrs.stability`/`fsrs.difficulty` stay at their new-card zero value, so
-`FSRS.isNew` (and everything keyed off it, like the daily new-card limit)
-continues to treat the card as new until it graduates.
--}
 type alias Card =
     { id : CardId
     , front : String
@@ -59,10 +50,6 @@ review desiredRetention now rating card =
             { card | fsrs = FSRS.review desiredRetention now rating card.fsrs }
 
 
-{-| Wipes a card's FSRS progress and puts it back at the front of the
-learning queue, due immediately — same starting state as a freshly created
-card, just keeping its id/front/back.
--}
 resetToLearning : Posix -> Card -> Card
 resetToLearning now card =
     { card
@@ -71,10 +58,6 @@ resetToLearning now card =
     }
 
 
-{-| Pushes a card's next appearance out by `days` from now, without
-touching its scheduling state (stability/difficulty/learning step) —
-a pure "not today" postponement, not a review.
--}
 defer : Int -> Posix -> Card -> Card
 defer days now card =
     let
@@ -92,6 +75,7 @@ addDays days t =
 setFsrsDue : Posix -> Posix -> FSRS.State -> FSRS.State
 setFsrsDue now due fsrs =
     { fsrs | due = due, lastReview = now }
+
 
 isDue : Posix -> Card -> Bool
 isDue now card =

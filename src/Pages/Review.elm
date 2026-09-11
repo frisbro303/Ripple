@@ -1,25 +1,17 @@
-module Pages.Review exposing (Model, Msg, OutMsg(..), editBack, editFront, init, isIdle, isRevealed, rate, requestPick, reveal, update, view, viewActions)
+module Pages.Review exposing (Model, Msg, OutMsg(..), editBack, editFront, init, isIdle, isRevealed, rate, requestPick, reveal, subscriptions, themeChanged, update, view, viewActions)
 
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, hr, p, span, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
-import Ops.Op exposing (Op, OpId(..), OpKind(..))
+import Ops.Op as Op exposing (Op, OpKind(..))
 import Ops.OpsLog exposing (OpsLog)
-import Random
 import Sea.Card as Card
 import Sea.FSRS exposing (Rating(..))
 import Sea.Sea as Sea exposing (Sea)
 import Task
 import Time
 import Typst.EditableTypst as EditableTypst
-import UUID
-
-
-
--- Picks the next due/new card once (on page-entry) and again after every
--- rate/delete — not reactively on every Sea change, so an in-progress review
--- isn't yanked out from under the user by an unrelated background sync.
 
 
 type Model
@@ -42,12 +34,6 @@ init =
     NotAsked
 
 
-
--- True unless a card is currently being reviewed — used by callers to avoid
--- re-picking (and discarding in-progress edits) when returning to a review
--- that's already underway.
-
-
 isIdle : Model -> Bool
 isIdle model =
     case model of
@@ -56,11 +42,6 @@ isIdle model =
 
         _ ->
             True
-
-
-
--- True only while a card is showing and its answer has been revealed —
--- used by callers wiring up keyboard shortcuts to gate the rating keys.
 
 
 isRevealed : Model -> Bool
@@ -86,6 +67,11 @@ editFront =
 editBack : Msg
 editBack =
     BackMsg EditableTypst.requestFocus
+
+
+themeChanged : Msg
+themeChanged =
+    ThemeChanged
 
 
 rate : Rating -> Msg
@@ -116,6 +102,7 @@ type Msg
     | AddCardClicked
     | LoginClicked
     | GotTimeForImageOp String String Time.Posix
+    | ThemeChanged
 
 
 type OutMsg
@@ -126,15 +113,8 @@ type OutMsg
     | ImagePersisted Op
 
 
-newOpId : Time.Posix -> OpId
-newOpId now =
-    Random.step UUID.generator (Random.initialSeed (Time.posixToMillis now))
-        |> Tuple.first
-        |> OpId
-
-
-update : Int -> Int -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update dailyNewLimit deferDays opsLog sea msg model =
+update : String -> Int -> Int -> Dict String String -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
     case msg of
         GotTimeForPick now ->
             case Sea.nextDue dailyNewLimit now opsLog sea of
@@ -142,14 +122,21 @@ update dailyNewLimit deferDays opsLog sea msg model =
                     ( Empty, Cmd.none, NoOutMsg )
 
                 Just card ->
+                    let
+                        ( frontModel, frontCmd ) =
+                            EditableTypst.initWithSource "review-front" "Front" "i" False preamble knownImages card.front
+
+                        ( backModel, backCmd ) =
+                            EditableTypst.initWithSource "review-back" "Back" "o" False preamble knownImages card.back
+                    in
                     ( Reviewing
                         { id = card.id
-                        , front = EditableTypst.initWithSource "review-front" "Front" "i" card.front
-                        , back = EditableTypst.initWithSource "review-back" "Back" "o" card.back
+                        , front = frontModel
+                        , back = backModel
                         , revealed = False
                         , menuOpen = False
                         }
-                    , Cmd.none
+                    , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
                     , NoOutMsg
                     )
 
@@ -169,6 +156,9 @@ update dailyNewLimit deferDays opsLog sea msg model =
                                     Task.perform (GotTimeForImageOp imgId data) Time.now
 
                                 EditableTypst.NoOutMsg ->
+                                    Cmd.none
+
+                                EditableTypst.ShiftEnterChain ->
                                     Cmd.none
                     in
                     ( Reviewing { current | front = frontModel }
@@ -195,6 +185,9 @@ update dailyNewLimit deferDays opsLog sea msg model =
                                     Task.perform (GotTimeForImageOp imgId data) Time.now
 
                                 EditableTypst.NoOutMsg ->
+                                    Cmd.none
+
+                                EditableTypst.ShiftEnterChain ->
                                     Cmd.none
                     in
                     ( Reviewing { current | back = backModel }
@@ -224,7 +217,7 @@ update dailyNewLimit deferDays opsLog sea msg model =
                                 newSource
 
                         op =
-                            { id = newOpId now
+                            { id = Op.newId now
                             , timeStamp = now
                             , opKind = EditCard { id = cardId, front = front, back = back }
                             }
@@ -253,7 +246,7 @@ update dailyNewLimit deferDays opsLog sea msg model =
         GotTimeForRate cardId rating now ->
             let
                 op =
-                    { id = newOpId now
+                    { id = Op.newId now
                     , timeStamp = now
                     , opKind = ReviewCard { id = cardId, rating = rating }
                     }
@@ -279,7 +272,7 @@ update dailyNewLimit deferDays opsLog sea msg model =
         GotTimeForDelete cardId now ->
             let
                 op =
-                    { id = newOpId now
+                    { id = Op.newId now
                     , timeStamp = now
                     , opKind = DeleteCard cardId
                     }
@@ -300,7 +293,7 @@ update dailyNewLimit deferDays opsLog sea msg model =
         GotTimeForResetLearning cardId now ->
             let
                 op =
-                    { id = newOpId now
+                    { id = Op.newId now
                     , timeStamp = now
                     , opKind = ResetToLearning cardId
                     }
@@ -321,7 +314,7 @@ update dailyNewLimit deferDays opsLog sea msg model =
         GotTimeForDefer cardId now ->
             let
                 op =
-                    { id = newOpId now
+                    { id = Op.newId now
                     , timeStamp = now
                     , opKind = DeferCard { id = cardId, days = deferDays }
                     }
@@ -337,16 +330,47 @@ update dailyNewLimit deferDays opsLog sea msg model =
         GotTimeForImageOp imgId data now ->
             let
                 op =
-                    { id = newOpId now
+                    { id = Op.newId now
                     , timeStamp = now
                     , opKind = AddImage { id = imgId, data = data }
                     }
             in
             ( model, Cmd.none, ImagePersisted op )
 
+        ThemeChanged ->
+            case model of
+                Reviewing current ->
+                    let
+                        ( frontModel, frontCmd, _ ) =
+                            EditableTypst.update EditableTypst.recompile current.front
 
-view : String -> Dict String String -> String -> Int -> Bool -> Model -> Html Msg
-view preamble knownImages theme deferDays isLoggedIn model =
+                        ( backModel, backCmd, _ ) =
+                            EditableTypst.update EditableTypst.recompile current.back
+                    in
+                    ( Reviewing { current | front = frontModel, back = backModel }
+                    , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
+                    , NoOutMsg
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOutMsg )
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    case model of
+        Reviewing current ->
+            Sub.batch
+                [ Sub.map FrontMsg (EditableTypst.subscriptions current.front)
+                , Sub.map BackMsg (EditableTypst.subscriptions current.back)
+                ]
+
+        _ ->
+            Sub.none
+
+
+view : Int -> Bool -> Model -> Html Msg
+view deferDays isLoggedIn model =
     case model of
         NotAsked ->
             p [ class "review-empty" ] [ text "Loading..." ]
@@ -369,7 +393,7 @@ view preamble knownImages theme deferDays isLoggedIn model =
             div [ class "review-stage" ]
                 [ div [ class "card-menu" ]
                     (button [ class "page-icon", onClick MenuToggled ]
-                        [ text "\u{22EF}" ]
+                        [ text "⋯" ]
                         :: (if current.menuOpen then
                                 [ div [ class "context-menu-overlay", onClick MenuToggled ] []
                                 , div [ class "card-menu-popover" ]
@@ -396,10 +420,10 @@ view preamble knownImages theme deferDays isLoggedIn model =
                            )
                     )
                 , div [ class "review-card-area" ]
-                    (Html.map FrontMsg (EditableTypst.view (editableTypstConfig preamble knownImages theme) current.front)
+                    (Html.map FrontMsg (EditableTypst.view current.front)
                         :: (if current.revealed then
                                 [ hr [ class "review-divider" ] []
-                                , Html.map BackMsg (EditableTypst.view (editableTypstConfig preamble knownImages theme) current.back)
+                                , Html.map BackMsg (EditableTypst.view current.back)
                                 ]
 
                             else
@@ -407,22 +431,6 @@ view preamble knownImages theme deferDays isLoggedIn model =
                            )
                     )
                 ]
-
-
-editableTypstConfig : String -> Dict String String -> String -> EditableTypst.ViewConfig
-editableTypstConfig preamble knownImages theme =
-    { preamble = preamble
-    , knownImages = knownImages
-    , theme = theme
-    , nextField = Nothing
-    , submitSelector = Nothing
-    }
-
-
-
--- Rendered separately from `view` so callers can place it outside their
--- scrollable content container — nesting `position: fixed` inside an
--- `overflow: auto` ancestor is unreliable in WKWebView.
 
 
 viewActions : Model -> Html Msg
@@ -455,5 +463,3 @@ ratingButton : String -> Msg -> String -> String -> Html Msg
 ratingButton modifierClass msg label hint =
     button [ class ("review-rating " ++ modifierClass), onClick msg ]
         [ text label, span [ class "btn-hint" ] [ text hint ] ]
-
-

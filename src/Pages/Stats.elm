@@ -1,4 +1,4 @@
-module Pages.Stats exposing (History, HistoryDay, Model, Msg, Summary, init, requestSummary, summarize, update, view)
+module Pages.Stats exposing (History, HistoryDay, Model, Msg, Summary, init, requestSummary, update, view)
 
 import Date exposing (Date)
 import Dict exposing (Dict)
@@ -14,16 +14,6 @@ import Svg
 import Svg.Attributes as SA
 import Task
 import Time
-
-
-
--- "New" means never introduced — no review has ever been submitted for the
--- card. "Learning" means it's been introduced (at least one review) but
--- hasn't graduated out of `Sea.Learning`'s short-term steps into FSRS-6
--- scheduling yet. Both are `FSRS.isNew`; the ops log is what tells them
--- apart, since a card's own state doesn't otherwise distinguish "never
--- touched" from "reset to step 0 by an Again". Neither is mutually
--- exclusive with "due": a fresh new card is due the moment it's created.
 
 
 type alias Summary =
@@ -51,11 +41,6 @@ summarize dailyNewLimit now opsLog sea =
         ( learningCards, newCards ) =
             List.partition (Sea.isIntroduced introduced) notYetGraduated
 
-        -- Matches `Sea.nextDue`'s gating exactly: the daily limit only caps
-        -- *introducing* new cards, not how many times an already-introduced
-        -- (but not yet graduated) card is allowed to reappear — so counting
-        -- every technically-"due" card here regardless made this number
-        -- disagree with what Review actually shows.
         allowNewIntroductions =
             Sea.newCardsToday now opsLog < dailyNewLimit
 
@@ -91,13 +76,6 @@ summarize dailyNewLimit now opsLog sea =
     , dailyStreak = dailyStreak now opsLog
     , retainedPercent = retainedPercent
     }
-
-
-
--- Consecutive calendar days (by the same day-rollover rule the scheduler
--- itself uses) with at least one review, counting backward from today — or
--- from yesterday if today has no review yet, so the streak doesn't zero out
--- until a full day passes with none.
 
 
 dailyStreak : Time.Posix -> OpsLog -> Int
@@ -139,11 +117,6 @@ dailyStreak now opsLog =
 dayNumber : Time.Posix -> Int
 dayNumber t =
     Date.toRataDie (FSRS.dateOf t)
-
-
-
--- Per-day rating counts for the last `days` days (oldest first), for the
--- review-history chart and the retention breakdown below it.
 
 
 type alias DayCounts =
@@ -219,16 +192,6 @@ history now days opsLog =
                 , counts = Dict.get (Date.toRataDie day) byDay |> Maybe.withDefault emptyDayCounts
                 }
             )
-
-
--- How many introduced (learning or graduated) cards will become due on each
--- of the next `days` calendar days — a forward-looking counterpart to the
--- review-history chart above. Cards that have never been introduced are
--- excluded: an un-introduced new card's `fsrs.due` is just its creation
--- time, not a real forecasted review date, so counting it here would just
--- dump every new card into "today" regardless of the daily new-card limit.
--- Anything already overdue (due in the past) is folded into today's count,
--- same as Anki's forecast does, rather than silently dropped.
 
 
 type alias ForecastDay =
@@ -518,13 +481,6 @@ forecastDaysLabel days =
 
         _ ->
             "Next " ++ String.fromInt days ++ " days"
-
-
-
--- Charts. Tooltips use plain SVG <title> (native browser hover tooltip)
--- rather than a custom cursor-following bubble — much less code, no
--- pointer-position tracking needed, at the cost of the reference's fancier
--- styled tooltip look.
 
 
 ratingSegments : List ( DayCounts -> Int, String, String )

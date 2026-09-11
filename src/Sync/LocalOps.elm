@@ -1,6 +1,7 @@
 module Sync.LocalOps exposing (Model, Msg(..), SyncStatus(..), init, insertNewOp, requestSync, sessionCleared, sessionEstablished, subscriptions, update)
 
 import Http
+import Json.Decode as Decode
 import Local.Db as Db
 import Ops.Op exposing (Op)
 import Ops.OpsLog as OpsLog exposing (OpsLog)
@@ -15,26 +16,12 @@ type alias Model =
 
 
 type Msg
-    = LocalOpsLoaded OpsLog
-    | SyncTick Time.Posix
+    = LocalOpsLoaded (Result Decode.Error OpsLog)
+    | SyncTick
     | GotRemoteOpIds (Result Http.Error (List String))
     | GotRemoteOps (Result Http.Error OpsLog)
     | GotPushResult (Result Http.Error ())
     | ImportedOps OpsLog
-
-
--- `fetchOps` (Sync.Sync) pulls the *entire* ops_log table — no filtering,
--- no pagination — and ops can carry base64-encoded card images (AddImage),
--- so polling it directly every 15s re-downloaded the whole history, images
--- included, four times a minute for as long as the app stayed open. That's
--- what blew through the Supabase egress quota. Every tick now fetches only
--- the `id` column first (Sync.fetchOpIds) — tiny, no image data — and
--- compares that set of ids against what's already known locally
--- (OpsLog.idStrings); `fetchOps` only runs, to actually pull/push the
--- difference, on the ticks where that comparison finds a real mismatch.
--- Since a mismatch also covers "I have a local op the server doesn't yet",
--- this still pushes this device's own new ops on the very next tick, same
--- as before.
 
 
 syncIntervalMs : Float
@@ -72,10 +59,13 @@ type SyncStatus
 update : Maybe Session -> Msg -> Model -> ( Model, Cmd Msg, SyncStatus )
 update session msg model =
     case msg of
-        LocalOpsLoaded ops ->
+        LocalOpsLoaded (Ok ops) ->
             ( OpsLog.merge ops model, Cmd.none, NoStatusChange )
 
-        SyncTick _ ->
+        LocalOpsLoaded (Err error) ->
+            ( model, Cmd.none, SyncFailed ("Couldn't load saved cards: " ++ Decode.errorToString error) )
+
+        SyncTick ->
             ( model, requestSync session, NoStatusChange )
 
         GotRemoteOpIds (Ok remoteIds) ->
@@ -131,13 +121,6 @@ update session msg model =
             ( OpsLog.merge importedOps model, Db.insertOps toInsert, NoStatusChange )
 
 
-{-| A 401 means the access token itself was rejected — most likely it's
-expired mid-session (Supabase's JWTs are short-lived, and until now nothing
-ever refreshed it after the one-time refresh at app launch). Surfacing this
-distinctly from a generic `SyncFailed` lets the caller kick off a token
-refresh instead of just sitting on a permanently-red sync indicator that
-never recovers even once the network (or the real problem) is back.
--}
 classifyError : Http.Error -> SyncStatus
 classifyError error =
     case error of
@@ -183,7 +166,7 @@ subscriptions session =
         [ Db.opsLoaded LocalOpsLoaded
         , case session of
             Just _ ->
-                Time.every syncIntervalMs SyncTick
+                Time.every syncIntervalMs (always SyncTick)
 
             Nothing ->
                 Sub.none

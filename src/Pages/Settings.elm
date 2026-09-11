@@ -1,13 +1,16 @@
-module Pages.Settings exposing (Model, Msg, SyncUpdate(..), applySyncedPreamble, applySyncedRetention, dailyNewLimit, decodeFromStore, default, deferDays, desiredRetention, request, typstPreamble, update, view)
+module Pages.Settings exposing (Model, Msg, SyncUpdate(..), applySyncedPreamble, applySyncedRetention, dailyNewLimit, decodeFromStore, default, deferDays, desiredRetention, request, subscriptions, typstPreamble, update, view)
 
-import Html exposing (Html, div, h3, label, node, option, select, text)
-import Html.Attributes exposing (attribute, class, for, id, selected, type_, value)
-import Html.Attributes as Attr
-import Html.Events exposing (on, onBlur, onInput)
+import Browser.Events
+import Html exposing (Html, div, h3, label, option, select, text, textarea)
+import Html.Attributes as Attr exposing (attribute, class, for, id, placeholder, selected, spellcheck, style, type_, value)
+import Html.Events exposing (on, onBlur, onInput, preventDefaultOn)
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Local.Store as Store
 import Theme exposing (Theme)
+import Typst.Highlight as Highlight
+import Typst.Keymap as Keymap
+import Typst.Port as Port
 
 
 type alias Model =
@@ -19,7 +22,32 @@ type alias Model =
     , deferDaysInput : String
     , typstPreamble : String
     , theme : Theme
+    , highlightTree : Maybe Highlight.Node
+    , fieldHeight : Float
+    , drag : Maybe Drag
+    , scrollTop : Float
     }
+
+
+type alias Drag =
+    { startY : Float
+    , startHeight : Float
+    }
+
+
+defaultFieldHeight : Float
+defaultFieldHeight =
+    128
+
+
+minFieldHeight : Float
+minFieldHeight =
+    64
+
+
+maxFieldHeight : Float
+maxFieldHeight =
+    480
 
 
 default : Model
@@ -32,6 +60,10 @@ default =
     , deferDaysInput = "2"
     , typstPreamble = ""
     , theme = Theme.System
+    , highlightTree = Nothing
+    , fieldHeight = defaultFieldHeight
+    , drag = Nothing
+    , scrollTop = 0
     }
 
 
@@ -119,7 +151,12 @@ decodeFromStore loadedKey val =
                                 , theme = fields.theme |> Maybe.map Theme.fromString |> Maybe.withDefault default.theme
                             }
                     in
-                    ( model, Theme.setTheme model.theme )
+                    ( model
+                    , Cmd.batch
+                        [ Port.highlightTypst preambleFieldId model.typstPreamble
+                        , Theme.setTheme model.theme
+                        ]
+                    )
                 )
 
     else
@@ -151,6 +188,12 @@ type Msg
     | ThemeChanged String
     | PreambleChanged String
     | PreambleBlurred
+    | GotHighlightTree String Decode.Value
+    | HandlePressed Float
+    | HandleDragged Float
+    | HandleReleased
+    | Scrolled Float
+    | KeyOutcome Keymap.Outcome
 
 
 type SyncUpdate
@@ -163,14 +206,6 @@ update : Msg -> Model -> ( Model, Cmd Msg, SyncUpdate )
 update msg model =
     case msg of
         RetentionChanged raw ->
-            -- Deliberately not parsed/clamped here — doing that on every
-            -- keystroke fought the user mid-typing (e.g. typing "75" would
-            -- clamp the leading "7" to 50 before the second digit landed),
-            -- and rejecting unparseable input (like a momentarily empty
-            -- field) left the displayed value stuck out of sync with the
-            -- model, since an unchanged model produces no DOM patch. The
-            -- raw text is only parsed and clamped on blur, once the user's
-            -- done typing.
             ( { model | retentionInput = raw }, Cmd.none, NoSyncUpdate )
 
         RetentionBlurred ->
@@ -223,10 +258,57 @@ update msg model =
             ( newModel, Cmd.batch [ save newModel, Theme.setTheme newModel.theme ], NoSyncUpdate )
 
         PreambleChanged text_ ->
-            ( { model | typstPreamble = text_ }, Cmd.none, NoSyncUpdate )
+            ( { model | typstPreamble = text_ }, Port.highlightTypst preambleFieldId text_, NoSyncUpdate )
 
         PreambleBlurred ->
             ( model, save model, PreambleCommitted model.typstPreamble )
+
+        KeyOutcome outcome ->
+            case outcome of
+                Keymap.PassThrough ->
+                    ( model, Cmd.none, NoSyncUpdate )
+
+                Keymap.Blur ->
+                    ( model, Port.blurField preambleFieldId, NoSyncUpdate )
+
+                Keymap.Chain ->
+                    ( model, Cmd.none, NoSyncUpdate )
+
+                Keymap.Replace { value, start, end } ->
+                    ( { model | typstPreamble = value }
+                    , Cmd.batch [ Port.highlightTypst preambleFieldId value, Port.setSelection preambleFieldId start end ]
+                    , NoSyncUpdate
+                    )
+
+        GotHighlightTree requestId value ->
+            if requestId /= preambleFieldId then
+                ( model, Cmd.none, NoSyncUpdate )
+
+            else
+                ( { model | highlightTree = Decode.decodeValue Highlight.decoder value |> Result.toMaybe }
+                , Cmd.none
+                , NoSyncUpdate
+                )
+
+        HandlePressed clientY ->
+            ( { model | drag = Just { startY = clientY, startHeight = model.fieldHeight } }, Cmd.none, NoSyncUpdate )
+
+        HandleDragged clientY ->
+            case model.drag of
+                Just drag ->
+                    ( { model | fieldHeight = clamp minFieldHeight maxFieldHeight (drag.startHeight + (clientY - drag.startY)) }
+                    , Cmd.none
+                    , NoSyncUpdate
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoSyncUpdate )
+
+        HandleReleased ->
+            ( { model | drag = Nothing }, Cmd.none, NoSyncUpdate )
+
+        Scrolled scrollTop ->
+            ( { model | scrollTop = scrollTop }, Cmd.none, NoSyncUpdate )
 
 
 applySyncedPreamble : String -> Model -> ( Model, Cmd Msg )
@@ -235,7 +317,7 @@ applySyncedPreamble preamble model =
         newModel =
             { model | typstPreamble = preamble }
     in
-    ( newModel, save newModel )
+    ( newModel, Cmd.batch [ save newModel, Port.highlightTypst preambleFieldId preamble ] )
 
 
 applySyncedRetention : Int -> Model -> ( Model, Cmd Msg )
@@ -245,6 +327,22 @@ applySyncedRetention retentionPercent model =
             { model | retentionPercent = retentionPercent, retentionInput = String.fromInt retentionPercent }
     in
     ( newModel, save newModel )
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.batch
+        [ Port.typstHighlighted GotHighlightTree
+        , case model.drag of
+            Just _ ->
+                Sub.batch
+                    [ Browser.Events.onMouseMove (Decode.map HandleDragged (Decode.field "clientY" Decode.float))
+                    , Browser.Events.onMouseUp (Decode.succeed HandleReleased)
+                    ]
+
+            Nothing ->
+                Sub.none
+        ]
 
 
 view : Model -> Html Msg
@@ -312,23 +410,48 @@ view model =
             [ div [ class "settings-field" ]
                 [ label [ for preambleFieldId ] [ text "Preamble" ]
                 , div [ class "settings-preamble-wrap" ]
-                    [ node "typst-code-field"
-                        [ attribute "field-id" preambleFieldId
-                        , attribute "placeholder" "Typst preamble"
-                        , attribute "source" model.typstPreamble
-                        , on "typst-input" (Decode.map PreambleChanged detailValueDecoder)
-                        , on "typst-blur" (Decode.succeed PreambleBlurred)
+                    [ div
+                        [ class "note-editor-field-wrap"
+                        , style "height" (String.fromFloat model.fieldHeight ++ "px")
                         ]
-                        []
+                        [ div [ class "note-editor-highlight" ]
+                            [ div
+                                [ class "note-editor-highlight-scroll"
+                                , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
+                                ]
+                                [ case model.highlightTree of
+                                    Just tree ->
+                                        Highlight.view tree
+
+                                    Nothing ->
+                                        text model.typstPreamble
+                                ]
+                            ]
+                        , textarea
+                            [ id preambleFieldId
+                            , class "note-editor-field"
+                            , placeholder "Typst preamble"
+                            , value model.typstPreamble
+                            , attribute "autocorrect" "off"
+                            , attribute "autocapitalize" "off"
+                            , spellcheck False
+                            , onInput PreambleChanged
+                            , onBlur PreambleBlurred
+                            , on "scroll" (Decode.map Scrolled (Decode.at [ "target", "scrollTop" ] Decode.float))
+                            , Keymap.onKeyDown False KeyOutcome
+                            ]
+                            []
+                        , div
+                            [ class "note-editor-resize-handle"
+                            , preventDefaultOn "mousedown"
+                                (Decode.map (\clientY -> ( HandlePressed clientY, True )) (Decode.field "clientY" Decode.float))
+                            ]
+                            []
+                        ]
                     ]
                 ]
             ]
         ]
-
-
-detailValueDecoder : Decode.Decoder String
-detailValueDecoder =
-    Decode.at [ "detail", "value" ] Decode.string
 
 
 settingsSection : String -> List (Html Msg) -> Html Msg

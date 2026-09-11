@@ -6,16 +6,25 @@
   "scripts": {
     "elm:build": "cd src && elm make Main.elm --output=elm.js",
     "test": "elm-test",
+    "review": "elm-review",
     "tauri": "tauri"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "elm-test": "^0.19.1"
+    "elm-format": "^0.8.8",
+    "elm-review": "^2.13.5",
+    "elm-test": "^0.19.2-1"
   },
   "dependencies": {
     "elm": "^0.19.2-0"
   },
   "allowScripts": {
-    "elm@0.19.2-0": true
+    "elm@0.19.2-0": true,
+    "elmi-to-json@1.4.3": true,
+    "elm-format@0.8.8": true,
+    "fsevents@2.3.3": true
+  },
+  "overrides": {
+    "elmi-to-json": "^1.4.3"
   }
 }

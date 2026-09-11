@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  elm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx elm make src/Main.elm --output=/dev/null
+
+      - run: npx elm-test
+
+      - run: npx elm-review
+
+      - run: npx elm-format --validate src tests
+
+  rust:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workingDirectories: src-tauri
+
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check

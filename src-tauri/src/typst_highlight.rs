@@ -1,11 +1,6 @@
 use serde::Serialize;
 use typst_syntax::{highlight, LinkedNode, Tag};
 
-/// Mirrors `typst_syntax::highlight::highlight_html`'s own recursion exactly
-/// (see that crate's test module for the reference walk), but produces a
-/// JSON tree for the frontend to render as nested `Html` spans instead of an
-/// HTML string — tags can nest (e.g. `Strong` inside `Heading`), so this is
-/// a tree, not a flat non-overlapping token list.
 #[derive(Serialize)]
 pub struct HNode {
     tag: Option<&'static str>,

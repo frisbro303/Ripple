@@ -1,16 +1,25 @@
-import { getFocusable } from "./Typst/code-field.js";
+const inkFor = (darkMode) => (darkMode ? "#e8e9ec" : "#1c1e21");
 
-// "i"/"o" are global shortcuts (Main.elm's handleAddKey/handleReviewKey)
-// that focus the front/back editor field as a side effect. Elm's
-// `Browser.Events.onKeyDown` subscription is a passive listener — it can't
-// call `preventDefault()` — so the same keydown's default browser action
-// (inserting the typed character) still runs afterward, and since the
-// field has by then already been synchronously focused via the
-// `focusField` port, that default character insertion lands in the
-// field that was *just* opened instead of doing nothing. Since this only
-// happens when the key wasn't already headed for a text field, this
-// listener only needs to suppress the default for "i"/"o" when the
-// current target isn't already an input/textarea.
+function isDarkMode() {
+  const theme = document.documentElement.getAttribute("data-theme");
+  if (theme === "light") return false;
+  if (theme === "dark") return true;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+const FALLBACK_CARD_WIDTH_PX = 340.157480315 / 0.75;
+const PX_PER_PT = 0.75;
+
+function cardWidthPt() {
+  const area = document.querySelector(".review-card-area");
+  const widthPx = area ? area.clientWidth : FALLBACK_CARD_WIDTH_PX;
+  return widthPx * PX_PER_PT;
+}
+
+function cardTextSizePt() {
+  return window.matchMedia("(pointer: coarse)").matches ? 17 : 14;
+}
+
 document.addEventListener("keydown", (event) => {
   const isTextInput = event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA";
   if (!isTextInput && !event.metaKey && !event.ctrlKey && (event.key === "i" || event.key === "o")) {
@@ -18,26 +27,77 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// Non-editor, non-input chrome shouldn't show the browser's native context
-// menu; editor fields (<typst-code-field>) handle their own context menu
-// (opening the image picker) directly, and plain inputs keep their native
-// menu (e.g. for cut/copy/paste in a number field).
-document.addEventListener("contextmenu", (event) => {
-  const el = event.target;
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
-  event.preventDefault();
-});
+const lastSelection = new Map();
+
+document.addEventListener(
+  "blur",
+  (event) => {
+    const el = event.target;
+    if (el instanceof HTMLTextAreaElement && el.classList.contains("note-editor-field")) {
+      lastSelection.set(el.id, { start: el.selectionStart, end: el.selectionEnd });
+    }
+  },
+  true
+);
+
+function makeFieldVisible(el) {
+  const box = el.closest(".review-box");
+  if (box) box.classList.add("review-box--editing");
+}
+
+function restoreOrEndSelection(el, saved) {
+  if (saved && saved.end <= el.value.length) {
+    el.setSelectionRange(saved.start, saved.end);
+  } else {
+    el.setSelectionRange(el.value.length, el.value.length);
+  }
+}
 
 export function setupTauri(app) {
+  app.ports.compileTypstPort.subscribe(async ({ requestId, source: rawTypst, preamble, images }) => {
+    const [status, output] = await window.__TAURI__.core.invoke("render_typst", {
+      rawTypst,
+      ink: inkFor(isDarkMode()),
+      preamble,
+      images,
+      widthPt: cardWidthPt(),
+      textSizePt: cardTextSizePt(),
+    });
+    app.ports.rawTypstCompiledPort.send([requestId, status, output]);
+  });
+
+  app.ports.highlightTypstPort.subscribe(async ([requestId, source]) => {
+    const tree = await window.__TAURI__.core.invoke("highlight_typst", { source });
+    app.ports.typstHighlightedPort.send([requestId, tree]);
+  });
+
   app.ports.focusField.subscribe((id) => {
-    // Looked up in a registry populated at real-connect time (see
-    // Typst/code-field.js), so this can never be stale or missing because
-    // Elm hasn't patched the DOM yet — and `.focusField()` itself is fully
-    // synchronous (no rAF/setTimeout/await), so this stays within the
-    // original keydown's call stack, which iOS requires to raise the
-    // on-screen keyboard.
-    const el = getFocusable(id);
-    if (el && typeof el.focusField === "function") el.focusField();
+    const el = document.getElementById(id);
+    if (!el) return;
+    makeFieldVisible(el);
+    el.focus();
+    restoreOrEndSelection(el, lastSelection.get(id));
+  });
+
+  app.ports.blurField.subscribe((id) => {
+    const el = document.getElementById(id);
+    if (el) el.blur();
+  });
+
+  app.ports.setSelectionPort.subscribe(({ id, start, end }) => {
+    const el = document.getElementById(id);
+    if (el && typeof el.setSelectionRange === "function") el.setSelectionRange(start, end);
+  });
+
+  app.ports.alert.subscribe((message) => {
+    alert(message);
+  });
+
+  window.addEventListener("blur", () => {
+    app.ports.windowFocusChanged.send(false);
+  });
+  window.addEventListener("focus", () => {
+    app.ports.windowFocusChanged.send(true);
   });
 
   app.ports.setPort.subscribe(async ({ key, value }) => {
@@ -73,20 +133,13 @@ export function setupTauri(app) {
   app.ports.exportDataPort.subscribe(async (json) => {
     const blob = new Blob([json], { type: "application/json" });
 
-    // iOS Safari/WKWebView ignores the `download` attribute on `<a>`
-    // entirely, so the blob-download trick below silently does nothing
-    // there. The Web Share API is what actually works on touch devices —
-    // it opens the native share sheet (Files, AirDrop, Mail, etc). Desktop
-    // keeps the plain download, which is the more expected behavior there.
     const isTouch = window.matchMedia("(pointer: coarse)").matches;
     const file = new File([blob], "tide-backup.json", { type: "application/json" });
 
     if (isTouch && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({ files: [file] });
-      } catch (err) {
-        // User cancelled the share sheet — nothing else to do.
-      }
+      } catch (err) {}
       return;
     }
 
