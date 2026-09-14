@@ -89,6 +89,14 @@ export function setupTauri(app) {
     if (el && typeof el.setSelectionRange === "function") el.setSelectionRange(start, end);
   });
 
+  app.ports.applyEditPort.subscribe(({ id, rangeStart, rangeEnd, replacement, cursorStart, cursorEnd }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.setSelectionRange(rangeStart, rangeEnd);
+    document.execCommand("insertText", false, replacement);
+    el.setSelectionRange(cursorStart, cursorEnd);
+  });
+
   app.ports.alert.subscribe((message) => {
     alert(message);
   });
@@ -113,13 +121,22 @@ export function setupTauri(app) {
     app.ports.loadedPort.send({ key, value: value ?? null });
   });
 
-  app.ports.insertOpsPort.subscribe(async (ops) => {
-    await window.__TAURI__.core.invoke("db_insert_ops", { ops });
+  app.ports.insertOpsPort.subscribe(async ({ ops, synced }) => {
+    await window.__TAURI__.core.invoke("db_insert_ops", { ops, synced });
+  });
+
+  app.ports.markSyncedPort.subscribe(async (ids) => {
+    await window.__TAURI__.core.invoke("db_mark_synced", { ids });
   });
 
   app.ports.requestOpsPort.subscribe(async () => {
     const ops = await window.__TAURI__.core.invoke("db_get_ops");
     app.ports.opsLoadedPort.send(ops);
+  });
+
+  app.ports.requestPendingOpsPort.subscribe(async () => {
+    const ops = await window.__TAURI__.core.invoke("db_get_pending_ops");
+    app.ports.pendingOpsLoadedPort.send(ops);
   });
 
   app.ports.clearOpsPort.subscribe(async () => {

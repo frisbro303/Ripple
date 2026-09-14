@@ -1,5 +1,6 @@
 port module Typst.Port exposing
     ( alert
+    , applyEdit
     , blurField
     , compileTypst
     , focusField
@@ -11,6 +12,7 @@ port module Typst.Port exposing
     )
 
 import Json.Decode as Decode
+import Typst.Keymap as Keymap
 
 
 port focusField : String -> Cmd msg
@@ -31,6 +33,29 @@ port setSelectionPort : { id : String, start : Int, end : Int } -> Cmd msg
 setSelection : String -> Int -> Int -> Cmd msg
 setSelection id start end =
     setSelectionPort { id = id, start = start, end = end }
+
+
+port applyEditPort :
+    { id : String
+    , rangeStart : Int
+    , rangeEnd : Int
+    , replacement : String
+    , cursorStart : Int
+    , cursorEnd : Int
+    }
+    -> Cmd msg
+
+
+applyEdit : String -> Keymap.Edit -> Cmd msg
+applyEdit id edit =
+    applyEditPort
+        { id = id
+        , rangeStart = edit.rangeStart
+        , rangeEnd = edit.rangeEnd
+        , replacement = edit.replacement
+        , cursorStart = edit.cursorStart
+        , cursorEnd = edit.cursorEnd
+        }
 
 
 port compileTypstPort : { requestId : String, source : String, preamble : String, images : List ( String, String ) } -> Cmd msg

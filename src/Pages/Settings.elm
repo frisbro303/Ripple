@@ -274,11 +274,8 @@ update msg model =
                 Keymap.Chain ->
                     ( model, Cmd.none, NoSyncUpdate )
 
-                Keymap.Replace { value, start, end } ->
-                    ( { model | typstPreamble = value }
-                    , Cmd.batch [ Port.highlightTypst preambleFieldId value, Port.setSelection preambleFieldId start end ]
-                    , NoSyncUpdate
-                    )
+                Keymap.Replace edit ->
+                    ( model, Port.applyEdit preambleFieldId edit, NoSyncUpdate )
 
         GotHighlightTree requestId value ->
             if requestId /= preambleFieldId then

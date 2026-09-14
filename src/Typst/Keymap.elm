@@ -1,4 +1,4 @@
-module Typst.Keymap exposing (KeyInfo, Outcome(..), classify, onKeyDown)
+module Typst.Keymap exposing (Edit, KeyInfo, Outcome(..), classify, onKeyDown)
 
 import Html
 import Html.Events exposing (preventDefaultOn)
@@ -19,7 +19,16 @@ type Outcome
     = PassThrough
     | Blur
     | Chain
-    | Replace { value : String, start : Int, end : Int }
+    | Replace Edit
+
+
+type alias Edit =
+    { rangeStart : Int
+    , rangeEnd : Int
+    , replacement : String
+    , cursorStart : Int
+    , cursorEnd : Int
+    }
 
 
 onKeyDown : Bool -> (Outcome -> msg) -> Html.Attribute msg
@@ -74,7 +83,7 @@ classify chainable info =
 classifyOther : KeyInfo -> Outcome
 classifyOther info =
     if isCloseChar info.key && info.start == info.end && charAt info.start info.value == Just info.key then
-        Replace { value = info.value, start = info.start + 1, end = info.start + 1 }
+        skipOver info.start
 
     else if info.key == "Backspace" && info.start == info.end && info.start > 0 then
         backspaceAction info
@@ -89,27 +98,37 @@ classifyOther info =
         PassThrough
 
 
+skipOver : Int -> Outcome
+skipOver pos =
+    Replace { rangeStart = pos, rangeEnd = pos, replacement = "", cursorStart = pos + 1, cursorEnd = pos + 1 }
+
+
 bracketOrFence : String -> String -> Bool -> KeyInfo -> Outcome
 bracketOrFence key close isFence info =
     if info.start /= info.end then
         let
             selected =
                 String.slice info.start info.end info.value
-
-            newValue =
-                replaceRange info.start info.end (key ++ selected ++ close) info.value
         in
-        Replace { value = newValue, start = info.start + 1, end = info.start + 1 + String.length selected }
+        Replace
+            { rangeStart = info.start
+            , rangeEnd = info.end
+            , replacement = key ++ selected ++ close
+            , cursorStart = info.start + 1
+            , cursorEnd = info.start + 1 + String.length selected
+            }
 
     else if isFence && charAt info.start info.value == Just key then
-        Replace { value = info.value, start = info.start + 1, end = info.start + 1 }
+        skipOver info.start
 
     else
-        let
-            newValue =
-                replaceRange info.start info.start (key ++ close) info.value
-        in
-        Replace { value = newValue, start = info.start + 1, end = info.start + 1 }
+        Replace
+            { rangeStart = info.start
+            , rangeEnd = info.start
+            , replacement = key ++ close
+            , cursorStart = info.start + 1
+            , cursorEnd = info.start + 1
+            }
 
 
 backspaceAction : KeyInfo -> Outcome
@@ -123,9 +142,11 @@ backspaceAction info =
     in
     if matchesPair before after then
         Replace
-            { value = replaceRange (info.start - 1) (info.start + 1) "" info.value
-            , start = info.start - 1
-            , end = info.start - 1
+            { rangeStart = info.start - 1
+            , rangeEnd = info.start + 1
+            , replacement = ""
+            , cursorStart = info.start - 1
+            , cursorEnd = info.start - 1
             }
 
     else
@@ -152,18 +173,23 @@ tabAction info =
                             (++) "  "
                         )
                     |> String.join "\n"
-
-            newValue =
-                replaceRange lineStart info.end newSelected info.value
         in
-        Replace { value = newValue, start = lineStart, end = lineStart + String.length newSelected }
+        Replace
+            { rangeStart = lineStart
+            , rangeEnd = info.end
+            , replacement = newSelected
+            , cursorStart = lineStart
+            , cursorEnd = lineStart + String.length newSelected
+            }
 
     else
-        let
-            newValue =
-                replaceRange info.start info.end "  " info.value
-        in
-        Replace { value = newValue, start = info.start + 2, end = info.start + 2 }
+        Replace
+            { rangeStart = info.start
+            , rangeEnd = info.end
+            , replacement = "  "
+            , cursorStart = info.start + 2
+            , cursorEnd = info.start + 2
+            }
 
 
 enterAction : KeyInfo -> Outcome
@@ -186,26 +212,32 @@ enterAction info =
             insertion =
                 "\n" ++ innerIndent ++ "\n" ++ indent
 
-            newValue =
-                replaceRange info.start info.start insertion info.value
-
             newPos =
                 info.start + 1 + String.length innerIndent
         in
-        Replace { value = newValue, start = newPos, end = newPos }
+        Replace
+            { rangeStart = info.start
+            , rangeEnd = info.start
+            , replacement = insertion
+            , cursorStart = newPos
+            , cursorEnd = newPos
+            }
 
     else if indent /= "" then
         let
             insertion =
                 "\n" ++ indent
 
-            newValue =
-                replaceRange info.start info.start insertion info.value
-
             newPos =
                 info.start + String.length insertion
         in
-        Replace { value = newValue, start = newPos, end = newPos }
+        Replace
+            { rangeStart = info.start
+            , rangeEnd = info.start
+            , replacement = insertion
+            , cursorStart = newPos
+            , cursorEnd = newPos
+            }
 
     else
         PassThrough
@@ -271,11 +303,6 @@ charAt i s =
 
         c ->
             Just c
-
-
-replaceRange : Int -> Int -> String -> String -> String
-replaceRange start end replacement s =
-    String.left start s ++ replacement ++ String.dropLeft end s
 
 
 lastNewlineBefore : Int -> String -> Int

@@ -2,7 +2,7 @@ mod local_db;
 mod typst_highlight;
 mod typst_renderer;
 
-use local_db::{db_clear_ops, db_get_ops, db_insert_ops};
+use local_db::{db_clear_ops, db_get_ops, db_get_pending_ops, db_insert_ops, db_mark_synced};
 use tauri_plugin_store::StoreExt;
 use typst_highlight::highlight_typst;
 use typst_renderer::{render_as_svg, RenderOptions};
@@ -76,7 +76,9 @@ pub fn run() {
             store_get,
             store_delete,
             db_insert_ops,
+            db_mark_synced,
             db_get_ops,
+            db_get_pending_ops,
             db_clear_ops,
             highlight_typst
         ])

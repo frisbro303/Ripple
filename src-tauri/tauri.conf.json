@@ -37,11 +37,13 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "signingIdentity": "Developer ID Application: FELIX RISBRO HJERRILD GRANUM (U9379CAYS9)"
+      "signingIdentity": "Developer ID Application: FELIX RISBRO HJERRILD GRANUM (U9379CAYS9)",
+      "bundleVersion": "0.1.0.9"
     },
     "iOS": {
       "minimumSystemVersion": "15.0",
-      "developmentTeam": "U9379CAYS9"
+      "developmentTeam": "U9379CAYS9",
+      "bundleVersion": "0.1.0.9"
     }
   }
 }

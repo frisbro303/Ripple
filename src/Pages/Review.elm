@@ -11,7 +11,7 @@ import Sea.FSRS exposing (Rating(..))
 import Sea.Sea as Sea exposing (Sea)
 import Task
 import Time
-import Typst.EditableTypst as EditableTypst
+import Typst.Editor as Editor
 
 
 type Model
@@ -22,8 +22,8 @@ type Model
 
 type alias CurrentCard =
     { id : Card.CardId
-    , front : EditableTypst.Model
-    , back : EditableTypst.Model
+    , front : Editor.Model
+    , back : Editor.Model
     , revealed : Bool
     , menuOpen : Bool
     }
@@ -61,12 +61,12 @@ reveal =
 
 editFront : Msg
 editFront =
-    FrontMsg EditableTypst.requestFocus
+    FrontMsg Editor.requestFocus
 
 
 editBack : Msg
 editBack =
-    BackMsg EditableTypst.requestFocus
+    BackMsg Editor.requestFocus
 
 
 themeChanged : Msg
@@ -86,8 +86,8 @@ requestPick =
 
 type Msg
     = GotTimeForPick Time.Posix
-    | FrontMsg EditableTypst.Msg
-    | BackMsg EditableTypst.Msg
+    | FrontMsg Editor.Msg
+    | BackMsg Editor.Msg
     | GotTimeForEdit Card.CardId Bool String Time.Posix
     | RevealClicked
     | RateClicked Rating
@@ -124,10 +124,10 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
                 Just card ->
                     let
                         ( frontModel, frontCmd ) =
-                            EditableTypst.initWithSource "review-front" "Front" "i" False preamble knownImages card.front
+                            Editor.initWithSource "review-front" "Front" "i" False preamble knownImages card.front
 
                         ( backModel, backCmd ) =
-                            EditableTypst.initWithSource "review-back" "Back" "o" False preamble knownImages card.back
+                            Editor.initWithSource "review-back" "Back" "o" False preamble knownImages card.back
                     in
                     ( Reviewing
                         { id = card.id
@@ -145,20 +145,20 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
                 Reviewing current ->
                     let
                         ( frontModel, cmd, outMsg ) =
-                            EditableTypst.update frontMsg current.front
+                            Editor.update frontMsg current.front
 
                         editCmd =
                             case outMsg of
-                                EditableTypst.SourceCommitted newSource ->
+                                Editor.SourceCommitted newSource ->
                                     Task.perform (GotTimeForEdit current.id True newSource) Time.now
 
-                                EditableTypst.ImageAdded imgId data ->
+                                Editor.ImageAdded imgId data ->
                                     Task.perform (GotTimeForImageOp imgId data) Time.now
 
-                                EditableTypst.NoOutMsg ->
+                                Editor.NoOutMsg ->
                                     Cmd.none
 
-                                EditableTypst.ShiftEnterChain ->
+                                Editor.ShiftEnterChain ->
                                     Cmd.none
                     in
                     ( Reviewing { current | front = frontModel }
@@ -174,20 +174,20 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
                 Reviewing current ->
                     let
                         ( backModel, cmd, outMsg ) =
-                            EditableTypst.update backMsg current.back
+                            Editor.update backMsg current.back
 
                         editCmd =
                             case outMsg of
-                                EditableTypst.SourceCommitted newSource ->
+                                Editor.SourceCommitted newSource ->
                                     Task.perform (GotTimeForEdit current.id False newSource) Time.now
 
-                                EditableTypst.ImageAdded imgId data ->
+                                Editor.ImageAdded imgId data ->
                                     Task.perform (GotTimeForImageOp imgId data) Time.now
 
-                                EditableTypst.NoOutMsg ->
+                                Editor.NoOutMsg ->
                                     Cmd.none
 
-                                EditableTypst.ShiftEnterChain ->
+                                Editor.ShiftEnterChain ->
                                     Cmd.none
                     in
                     ( Reviewing { current | back = backModel }
@@ -207,11 +207,11 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
                                 newSource
 
                             else
-                                EditableTypst.currentSource current.front
+                                Editor.currentSource current.front
 
                         back =
                             if isFront then
-                                EditableTypst.currentSource current.back
+                                Editor.currentSource current.back
 
                             else
                                 newSource
@@ -342,10 +342,10 @@ update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
                 Reviewing current ->
                     let
                         ( frontModel, frontCmd, _ ) =
-                            EditableTypst.update EditableTypst.recompile current.front
+                            Editor.update Editor.recompile current.front
 
                         ( backModel, backCmd, _ ) =
-                            EditableTypst.update EditableTypst.recompile current.back
+                            Editor.update Editor.recompile current.back
                     in
                     ( Reviewing { current | front = frontModel, back = backModel }
                     , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
@@ -361,8 +361,8 @@ subscriptions model =
     case model of
         Reviewing current ->
             Sub.batch
-                [ Sub.map FrontMsg (EditableTypst.subscriptions current.front)
-                , Sub.map BackMsg (EditableTypst.subscriptions current.back)
+                [ Sub.map FrontMsg (Editor.subscriptions current.front)
+                , Sub.map BackMsg (Editor.subscriptions current.back)
                 ]
 
         _ ->
@@ -420,10 +420,10 @@ view deferDays isLoggedIn model =
                            )
                     )
                 , div [ class "review-card-area" ]
-                    (Html.map FrontMsg (EditableTypst.view current.front)
+                    (Html.map FrontMsg (Editor.view current.front)
                         :: (if current.revealed then
                                 [ hr [ class "review-divider" ] []
-                                , Html.map BackMsg (EditableTypst.view current.back)
+                                , Html.map BackMsg (Editor.view current.back)
                                 ]
 
                             else

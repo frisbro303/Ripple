@@ -5,7 +5,6 @@ import Json.Decode as Decode
 import Local.Db as Db
 import Ops.Op exposing (Op)
 import Ops.OpsLog as OpsLog exposing (OpsLog)
-import Set
 import Sync.Session exposing (Session)
 import Sync.Sync as Sync
 import Time
@@ -18,9 +17,9 @@ type alias Model =
 type Msg
     = LocalOpsLoaded (Result Decode.Error OpsLog)
     | SyncTick
-    | GotRemoteOpIds (Result Http.Error (List String))
     | GotRemoteOps (Result Http.Error OpsLog)
-    | GotPushResult (Result Http.Error ())
+    | PendingOpsLoaded (Result Decode.Error OpsLog)
+    | GotPushResult OpsLog (Result Http.Error ())
     | ImportedOps OpsLog
 
 
@@ -34,14 +33,41 @@ init =
     ( OpsLog.emptyOpsLog, Db.requestOps )
 
 
-insertNewOp : Op -> Model -> ( Model, Cmd Msg )
-insertNewOp op model =
-    ( OpsLog.insert op model, Db.insertOp op )
+insertNewOp : Maybe Session -> Op -> Model -> ( Model, Cmd Msg )
+insertNewOp session op model =
+    ( OpsLog.insert op model
+    , Cmd.batch [ Db.insertLocalOp op, pushNow session (OpsLog.fromList [ op ]) ]
+    )
 
 
-sessionEstablished : Session -> Cmd Msg
-sessionEstablished session =
-    Sync.fetchOps session GotRemoteOps
+pushNow : Maybe Session -> OpsLog -> Cmd Msg
+pushNow session ops =
+    case session of
+        Just activeSession ->
+            Sync.appendOps activeSession ops (GotPushResult ops)
+
+        Nothing ->
+            Cmd.none
+
+
+pull : Session -> Model -> Cmd Msg
+pull session model =
+    Sync.fetchOpsSince session (OpsLog.maxTimestamp model) GotRemoteOps
+
+
+sessionEstablished : Session -> Model -> Cmd Msg
+sessionEstablished session model =
+    Cmd.batch [ pull session model, Db.requestPendingOps ]
+
+
+requestSync : Maybe Session -> Model -> Cmd Msg
+requestSync session model =
+    case session of
+        Just activeSession ->
+            Cmd.batch [ pull activeSession model, Db.requestPendingOps ]
+
+        Nothing ->
+            Cmd.none
 
 
 sessionCleared : ( Model, Cmd Msg )
@@ -66,51 +92,24 @@ update session msg model =
             ( model, Cmd.none, SyncFailed ("Couldn't load saved cards: " ++ Decode.errorToString error) )
 
         SyncTick ->
-            ( model, requestSync session, NoStatusChange )
-
-        GotRemoteOpIds (Ok remoteIds) ->
-            if Set.fromList remoteIds == OpsLog.idStrings model then
-                ( model, Cmd.none, SyncSucceeded )
-
-            else
-                case session of
-                    Just activeSession ->
-                        ( model, Sync.fetchOps activeSession GotRemoteOps, NoStatusChange )
-
-                    Nothing ->
-                        ( model, Cmd.none, NoStatusChange )
-
-        GotRemoteOpIds (Err error) ->
-            ( model, Cmd.none, classifyError error )
+            ( model, requestSync session model, NoStatusChange )
 
         GotRemoteOps (Ok remoteOps) ->
-            case session of
-                Just activeSession ->
-                    let
-                        toPull =
-                            OpsLog.diff remoteOps model
-
-                        toPush =
-                            OpsLog.diff model remoteOps
-                    in
-                    ( OpsLog.merge remoteOps model
-                    , Cmd.batch
-                        [ Db.insertOps toPull
-                        , Sync.appendOps activeSession toPush GotPushResult
-                        ]
-                    , SyncSucceeded
-                    )
-
-                Nothing ->
-                    ( model, Cmd.none, NoStatusChange )
+            ( OpsLog.merge remoteOps model, Db.insertSyncedOps remoteOps, SyncSucceeded )
 
         GotRemoteOps (Err error) ->
             ( model, Cmd.none, classifyError error )
 
-        GotPushResult (Ok ()) ->
-            ( model, Cmd.none, SyncSucceeded )
+        PendingOpsLoaded (Ok pendingOps) ->
+            ( model, pushNow session pendingOps, NoStatusChange )
 
-        GotPushResult (Err error) ->
+        PendingOpsLoaded (Err error) ->
+            ( model, Cmd.none, SyncFailed ("Couldn't read pending changes: " ++ Decode.errorToString error) )
+
+        GotPushResult pushedOps (Ok ()) ->
+            ( model, Db.markSynced pushedOps, SyncSucceeded )
+
+        GotPushResult _ (Err error) ->
             ( model, Cmd.none, classifyError error )
 
         ImportedOps importedOps ->
@@ -118,7 +117,10 @@ update session msg model =
                 toInsert =
                     OpsLog.diff importedOps model
             in
-            ( OpsLog.merge importedOps model, Db.insertOps toInsert, NoStatusChange )
+            ( OpsLog.merge importedOps model
+            , Cmd.batch [ Db.insertLocalOps toInsert, pushNow session toInsert ]
+            , NoStatusChange
+            )
 
 
 classifyError : Http.Error -> SyncStatus
@@ -150,20 +152,11 @@ describeHttpError error =
             "Sync failed: unexpected response"
 
 
-requestSync : Maybe Session -> Cmd Msg
-requestSync maybeSession =
-    case maybeSession of
-        Just session ->
-            Sync.fetchOpIds session GotRemoteOpIds
-
-        Nothing ->
-            Cmd.none
-
-
 subscriptions : Maybe Session -> Sub Msg
 subscriptions session =
     Sub.batch
         [ Db.opsLoaded LocalOpsLoaded
+        , Db.pendingOpsLoaded PendingOpsLoaded
         , case session of
             Just _ ->
                 Time.every syncIntervalMs (always SyncTick)

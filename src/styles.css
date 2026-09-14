@@ -366,7 +366,7 @@ button:focus-visible .btn-hint {
   transition: background-color 0.18s ease;
 }
 
-@keyframes editable-typst-fade-in {
+@keyframes editor-fade-in {
   from {
     opacity: 0;
     transform: translateY(2px);
@@ -379,7 +379,7 @@ button:focus-visible .btn-hint {
 
 .review-box img,
 .review-box .note-editor-error {
-  animation: editable-typst-fade-in 0.16s ease;
+  animation: editor-fade-in 0.16s ease;
 }
 
 .review-box img {
@@ -399,30 +399,30 @@ button:focus-visible .btn-hint {
   overflow: hidden;
 }
 
-/* The editor and preview layers are both always mounted (see the comment
-   on EditableTypst.view for why) — only one is ever shown at a time. */
-.editable-typst-edit {
+/* Both layers stay mounted so the preview keeps its compiled size while the
+   editor is hidden, avoiding a layout jump when switching between them. */
+.editor-edit {
   display: none;
   width: 100%;
 }
 
-.review-box--editing .editable-typst-edit {
+.review-box--editing .editor-edit {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
   text-align: left;
-  animation: editable-typst-fade-in 0.16s ease;
+  animation: editor-fade-in 0.16s ease;
 }
 
-.editable-typst-preview-layer {
+.editor-preview-layer {
   display: contents;
 }
 
-.review-box--editing .editable-typst-preview-layer {
+.review-box--editing .editor-preview-layer {
   display: none;
 }
 
-.editable-typst-hint {
+.editor-hint {
   position: absolute;
   top: 0.5rem;
   right: 0.75rem;
@@ -437,7 +437,7 @@ button:focus-visible .btn-hint {
   transition: opacity 0.12s ease;
 }
 
-.review-box:hover .editable-typst-hint {
+.review-box:hover .editor-hint {
   opacity: 1;
 }
 
@@ -1206,7 +1206,7 @@ button:focus-visible .btn-hint {
      tab-bar tooltip above — WebKit's touch-as-focus-visible quirk can make
      :focus-visible-triggered ones (`.btn-hint`) stick around after a tap
      instead of only ever appearing on real hover. Hide both unconditionally. */
-  .editable-typst-hint,
+  .editor-hint,
   .btn-hint {
     visibility: hidden !important;
   }

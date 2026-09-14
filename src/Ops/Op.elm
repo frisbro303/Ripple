@@ -1,4 +1,4 @@
-module Ops.Op exposing (Op, OpId(..), OpKind(..), decoder, encoder, newId)
+module Ops.Op exposing (Op, OpId(..), OpKind(..), decoder, encoder, idString, newId)
 
 import Iso8601
 import Json.Decode as Decode
@@ -26,6 +26,15 @@ newId now =
 
 type OpId
     = OpId UUID
+
+
+idString : Op -> String
+idString op =
+    let
+        (OpId uuid) =
+            op.id
+    in
+    UUID.toString uuid
 
 
 type OpKind

@@ -15,7 +15,7 @@ apply sessionUpdate model =
             ( { model | session = Just session }
             , Cmd.batch
                 [ Session.save session
-                , LocalOps.sessionEstablished session
+                , LocalOps.sessionEstablished session model.localOps
                 ]
             )
 

@@ -1,4 +1,4 @@
-module Ops.OpsLog exposing (OpsLog, diff, emptyOpsLog, foldl, fromList, idStrings, insert, merge, toList)
+module Ops.OpsLog exposing (OpsLog, diff, emptyOpsLog, foldl, fromList, idStrings, insert, maxTimestamp, merge, toList)
 
 import Dict exposing (Dict)
 import Ops.Op exposing (Op, OpId(..))
@@ -53,6 +53,14 @@ merge (OpsLog a) (OpsLog b) =
 diff : OpsLog -> OpsLog -> OpsLog
 diff (OpsLog a) (OpsLog b) =
     OpsLog (Dict.diff a b)
+
+
+maxTimestamp : OpsLog -> Maybe Time.Posix
+maxTimestamp (OpsLog dict) =
+    Dict.values dict
+        |> List.map (.timeStamp >> Time.posixToMillis)
+        |> List.maximum
+        |> Maybe.map Time.millisToPosix
 
 
 idStrings : OpsLog -> Set String

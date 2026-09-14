@@ -8,13 +8,13 @@ import Ops.Op as Op exposing (Op, OpId(..), OpKind(..))
 import Random
 import Task
 import Time
-import Typst.EditableTypst as EditableTypst
+import Typst.Editor as Editor
 import UUID
 
 
 type alias Model =
-    { front : EditableTypst.Model
-    , back : EditableTypst.Model
+    { front : Editor.Model
+    , back : Editor.Model
     , preamble : String
     , knownImages : Dict String String
     , error : Maybe String
@@ -23,8 +23,8 @@ type alias Model =
 
 init : String -> Dict String String -> Model
 init preamble knownImages =
-    { front = EditableTypst.init "add-front" "Front" "i" True preamble knownImages
-    , back = EditableTypst.init "add-back" "Back" "o" True preamble knownImages
+    { front = Editor.init "add-front" "Front" "i" True preamble knownImages
+    , back = Editor.init "add-back" "Back" "o" True preamble knownImages
     , preamble = preamble
     , knownImages = knownImages
     , error = Nothing
@@ -32,8 +32,8 @@ init preamble knownImages =
 
 
 type Msg
-    = FrontMsg EditableTypst.Msg
-    | BackMsg EditableTypst.Msg
+    = FrontMsg Editor.Msg
+    | BackMsg Editor.Msg
     | SubmitClicked
     | GotTimeForSubmit Time.Posix
     | CancelClicked
@@ -50,12 +50,12 @@ type OutMsg
 
 editFront : Msg
 editFront =
-    FrontMsg EditableTypst.requestFocus
+    FrontMsg Editor.requestFocus
 
 
 editBack : Msg
 editBack =
-    BackMsg EditableTypst.requestFocus
+    BackMsg Editor.requestFocus
 
 
 themeChanged : Msg
@@ -69,16 +69,16 @@ update msg model =
         FrontMsg frontMsg ->
             let
                 ( frontModel, cmd, outMsg ) =
-                    EditableTypst.update frontMsg model.front
+                    Editor.update frontMsg model.front
 
                 modelAfterFront =
                     { model | front = frontModel }
             in
             case outMsg of
-                EditableTypst.ImageAdded imgId data ->
+                Editor.ImageAdded imgId data ->
                     ( modelAfterFront, Cmd.batch [ Cmd.map FrontMsg cmd, Task.perform (GotTimeForImageOp imgId data) Time.now ], NoOutMsg )
 
-                EditableTypst.ShiftEnterChain ->
+                Editor.ShiftEnterChain ->
                     let
                         ( modelAfterChain, chainCmd, _ ) =
                             update editBack modelAfterFront
@@ -91,16 +91,16 @@ update msg model =
         BackMsg backMsg ->
             let
                 ( backModel, cmd, outMsg ) =
-                    EditableTypst.update backMsg model.back
+                    Editor.update backMsg model.back
 
                 modelAfterBack =
                     { model | back = backModel }
             in
             case outMsg of
-                EditableTypst.ImageAdded imgId data ->
+                Editor.ImageAdded imgId data ->
                     ( modelAfterBack, Cmd.batch [ Cmd.map BackMsg cmd, Task.perform (GotTimeForImageOp imgId data) Time.now ], NoOutMsg )
 
-                EditableTypst.ShiftEnterChain ->
+                Editor.ShiftEnterChain ->
                     let
                         ( modelAfterSubmit, submitCmd, submitOut ) =
                             update SubmitClicked modelAfterBack
@@ -111,7 +111,7 @@ update msg model =
                     ( modelAfterBack, Cmd.map BackMsg cmd, NoOutMsg )
 
         SubmitClicked ->
-            if EditableTypst.isBlank model.front || EditableTypst.isBlank model.back then
+            if Editor.isBlank model.front || Editor.isBlank model.back then
                 ( { model | error = Just "Both sides are required" }, Cmd.none, NoOutMsg )
 
             else
@@ -131,8 +131,8 @@ update msg model =
                     , opKind =
                         CreateCard
                             { id = cardUuid
-                            , front = EditableTypst.currentSource model.front
-                            , back = EditableTypst.currentSource model.back
+                            , front = Editor.currentSource model.front
+                            , back = Editor.currentSource model.back
                             }
                     }
             in
@@ -154,10 +154,10 @@ update msg model =
         ThemeChanged ->
             let
                 ( frontModel, frontCmd, _ ) =
-                    EditableTypst.update EditableTypst.recompile model.front
+                    Editor.update Editor.recompile model.front
 
                 ( backModel, backCmd, _ ) =
-                    EditableTypst.update EditableTypst.recompile model.back
+                    Editor.update Editor.recompile model.back
             in
             ( { model | front = frontModel, back = backModel }
             , Cmd.batch [ Cmd.map FrontMsg frontCmd, Cmd.map BackMsg backCmd ]
@@ -168,17 +168,17 @@ update msg model =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ Sub.map FrontMsg (EditableTypst.subscriptions model.front)
-        , Sub.map BackMsg (EditableTypst.subscriptions model.back)
+        [ Sub.map FrontMsg (Editor.subscriptions model.front)
+        , Sub.map BackMsg (Editor.subscriptions model.back)
         ]
 
 
 view : Model -> Html Msg
 view model =
     div [ class "review-card-area" ]
-        [ Html.map FrontMsg (EditableTypst.view model.front)
+        [ Html.map FrontMsg (Editor.view model.front)
         , hr [ class "review-divider" ] []
-        , Html.map BackMsg (EditableTypst.view model.back)
+        , Html.map BackMsg (Editor.view model.back)
         , case model.error of
             Just err ->
                 p [ class "note-editor-error" ] [ text err ]

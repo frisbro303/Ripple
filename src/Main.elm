@@ -362,7 +362,7 @@ updateInner msg model =
                     { id = Op.newId now, timeStamp = now, opKind = Op.SetPreamble preamble }
 
                 ( localOpsModel, cmd ) =
-                    LocalOps.insertNewOp op model.localOps
+                    LocalOps.insertNewOp model.session op model.localOps
             in
             ( { model | localOps = localOpsModel }, Cmd.map LocalOpsMsg cmd )
 
@@ -372,7 +372,7 @@ updateInner msg model =
                     { id = Op.newId now, timeStamp = now, opKind = Op.SetRetention retentionPercent }
 
                 ( localOpsModel, cmd ) =
-                    LocalOps.insertNewOp op model.localOps
+                    LocalOps.insertNewOp model.session op model.localOps
             in
             ( { model | localOps = localOpsModel }, Cmd.map LocalOpsMsg cmd )
 
@@ -418,7 +418,7 @@ handleAddMsg addMsg model =
                 Add.Submitted op ->
                     let
                         ( localOpsModel, localOpsCmd ) =
-                            LocalOps.insertNewOp op model.localOps
+                            LocalOps.insertNewOp model.session op model.localOps
                     in
                     ( { model | localOps = localOpsModel, page = Page.Review }
                     , Cmd.batch [ Cmd.map LocalOpsMsg localOpsCmd, pickIfIdle model.review ]
@@ -430,7 +430,7 @@ handleAddMsg addMsg model =
                 Add.ImagePersisted op ->
                     let
                         ( localOpsModel, localOpsCmd ) =
-                            LocalOps.insertNewOp op model.localOps
+                            LocalOps.insertNewOp model.session op model.localOps
                     in
                     ( { model | localOps = localOpsModel }, Cmd.map LocalOpsMsg localOpsCmd )
     in
@@ -456,7 +456,7 @@ handleReviewMsg reviewMsg model =
                 Review.Submitted op ->
                     let
                         ( localOpsModel, localOpsCmd ) =
-                            LocalOps.insertNewOp op model.localOps
+                            LocalOps.insertNewOp model.session op model.localOps
                     in
                     ( { model | localOps = localOpsModel }, Cmd.map LocalOpsMsg localOpsCmd )
 
@@ -469,7 +469,7 @@ handleReviewMsg reviewMsg model =
                 Review.ImagePersisted op ->
                     let
                         ( localOpsModel, localOpsCmd ) =
-                            LocalOps.insertNewOp op model.localOps
+                            LocalOps.insertNewOp model.session op model.localOps
                     in
                     ( { model | localOps = localOpsModel }, Cmd.map LocalOpsMsg localOpsCmd )
     in
@@ -507,7 +507,7 @@ togglePage page model =
                     Cmd.map StatsMsg Stats.requestSummary
 
                 Page.Account ->
-                    Cmd.map LocalOpsMsg (LocalOps.requestSync model.session)
+                    Cmd.map LocalOpsMsg (LocalOps.requestSync model.session model.localOps)
 
                 _ ->
                     Cmd.none
