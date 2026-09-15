@@ -1,8 +1,8 @@
 # Ripple
 
 [![CI](https://github.com/frisbro303/ripple/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/frisbro303/ripple/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/frisbro303/ripple)](https://github.com/frisbro303/ripple/releases/latest)
-[![License: GPL v3](https://img.shields.io/github/license/frisbro303/ripple)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/frisbro303/ripple?color=blue)](https://github.com/frisbro303/ripple/releases/latest)
+[![License: GPL v3](https://img.shields.io/github/license/frisbro303/ripple?color=blue)](LICENSE)
 
 An opinionated spaced-repetition flashcard tool. 
 No deck-management procrastination - edit cards as you review, 
