@@ -8,8 +8,6 @@ An opinionated spaced-repetition flashcard tool.
 No deck-management procrastination - edit cards as you review, 
 so your time stays focused on what matters: learning.
 
-☕ [Buy Me a Coffee](https://www.buymeacoffee.com/frisbro)
-
 ## Installation
 
 Download the latest macOS build from the [releases page](https://github.com/frisbro303/ripple/releases/latest).
