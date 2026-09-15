@@ -3,11 +3,12 @@
 [![CI](https://github.com/frisbro303/ripple/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/frisbro303/ripple/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/frisbro303/ripple?color=blue)](https://github.com/frisbro303/ripple/releases/latest)
 [![License: GPL v3](https://img.shields.io/github/license/frisbro303/ripple?color=blue)](LICENSE)
-[![Buy Me a Coffee](https://img.shields.io/badge/-Buy%20Me%20a%20Coffee-ffdd00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/frisbro)
 
 An opinionated spaced-repetition flashcard tool. 
 No deck-management procrastination - edit cards as you review, 
 so your time stays focused on what matters: learning.
+
+☕ [Buy Me a Coffee](https://www.buymeacoffee.com/frisbro)
 
 ## Installation
 
