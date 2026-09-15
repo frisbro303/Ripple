@@ -1,17 +1,16 @@
 module Sync.SessionLifecycle exposing (apply)
 
-import Sync.Account as Account
 import Sync.LocalOps as LocalOps
-import Sync.Session as Session exposing (Session)
+import Sync.Session as Session exposing (Session, SessionUpdate(..))
 
 
 apply :
-    Account.SessionUpdate
+    SessionUpdate
     -> { model | session : Maybe Session, localOps : LocalOps.Model }
     -> ( { model | session : Maybe Session, localOps : LocalOps.Model }, Cmd LocalOps.Msg )
 apply sessionUpdate model =
     case sessionUpdate of
-        Account.SessionEstablished session ->
+        SessionEstablished session ->
             ( { model | session = Just session }
             , Cmd.batch
                 [ Session.save session
@@ -19,7 +18,7 @@ apply sessionUpdate model =
                 ]
             )
 
-        Account.SessionCleared ->
+        SessionCleared ->
             let
                 ( localOpsModel, localOpsCmd ) =
                     LocalOps.sessionCleared
@@ -28,5 +27,5 @@ apply sessionUpdate model =
             , Cmd.batch [ Session.clear, localOpsCmd ]
             )
 
-        Account.NoSessionChange ->
+        NoSessionChange ->
             ( model, Cmd.none )

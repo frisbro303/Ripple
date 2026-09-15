@@ -1,4 +1,4 @@
-module Sync.Session exposing (Session, clear, decodeFromStore, decoder, request, save)
+module Sync.Session exposing (Session, SessionUpdate(..), clear, decodeFromStore, decoder, request, save)
 
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -16,6 +16,12 @@ type alias Session =
     , userId : String
     , email : String
     }
+
+
+type SessionUpdate
+    = NoSessionChange
+    | SessionEstablished Session
+    | SessionCleared
 
 
 decoder : Decode.Decoder Session

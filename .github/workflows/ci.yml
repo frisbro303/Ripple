@@ -18,6 +18,13 @@ jobs:
 
       - run: npm ci
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.elm
+          key: ${{ runner.os }}-elm-${{ hashFiles('elm.json', 'review/elm.json') }}
+          restore-keys: |
+            ${{ runner.os }}-elm-
+
       - run: npx elm make src/Main.elm --output=/dev/null
 
       - run: npx elm-test
@@ -37,7 +44,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workingDirectories: src-tauri
+          workspaces: src-tauri
 
       - run: cargo check --manifest-path src-tauri/Cargo.toml
 

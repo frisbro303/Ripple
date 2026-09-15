@@ -9,6 +9,8 @@ name: Release macOS
 #   APPLE_TEAM_ID                  - Developer team ID (U9379CAYS9)
 
 on:
+  release:
+    types: [published]
   push:
     tags:
       - "v*"
@@ -36,9 +38,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workingDirectories: src-tauri
+          workspaces: src-tauri
 
       - run: npm ci
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.elm
+          key: ${{ runner.os }}-elm-${{ hashFiles('elm.json', 'review/elm.json') }}
+          restore-keys: |
+            ${{ runner.os }}-elm-
 
       - name: Import signing certificate
         env:
@@ -50,6 +59,11 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
 
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          if ! openssl pkcs12 -in "$CERT_PATH" -passin "pass:$APPLE_CERTIFICATE_PASSWORD" -noout 2>/dev/null; then
+            echo "::error::APPLE_CERTIFICATE did not decode to a valid .p12 readable with APPLE_CERTIFICATE_PASSWORD. Re-export the Developer ID Application certificate (select both the cert and its private key in Keychain Access) as a .p12, then run: base64 -i cert.p12 | pbcopy, and replace the APPLE_CERTIFICATE secret with that."
+            exit 1
+          fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -68,11 +82,17 @@ jobs:
       - name: Determine release tag
         id: release
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          fi
+          case "${{ github.event_name }}" in
+            release)
+              echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_dispatch)
+              echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         with:
@@ -84,6 +104,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
-          name: Ripple ${{ steps.release.outputs.tag }}
-          generate_release_notes: true
+          name: ${{ github.event_name != 'release' && format('Ripple {0}', steps.release.outputs.tag) || '' }}
+          generate_release_notes: ${{ github.event_name != 'release' }}
           files: src-tauri/target/release/bundle/dmg/*.dmg

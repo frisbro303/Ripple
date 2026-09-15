@@ -1,13 +1,13 @@
-module Sync.Account exposing (Model, Msg, SessionUpdate(..), init, refresh, update, view)
+module Sync.Auth exposing (Model, Msg, authRequest, errorMessage, handleUnitResponse, init, refresh, update, view)
 
-import Html exposing (Html, button, div, form, h3, input, p, span, text)
+import Html exposing (Html, button, div, form, input, p, text)
 import Html.Attributes exposing (class, placeholder, required, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Sync.Config exposing (anonKey, supabaseUrl)
-import Sync.Session as Session exposing (Session)
+import Sync.Session as Session exposing (Session, SessionUpdate(..))
 
 
 type Stage
@@ -28,12 +28,6 @@ type LoginError
     | OtherLoginError String
 
 
-type SessionUpdate
-    = NoSessionChange
-    | SessionEstablished Session
-    | SessionCleared
-
-
 type alias Model =
     { email : String
     , password : String
@@ -42,13 +36,6 @@ type alias Model =
     , stage : Stage
     , mode : AuthMode
     , error : Maybe String
-    , newPassword : String
-    , newPasswordConfirm : String
-    , passwordError : Maybe String
-    , passwordSaved : Bool
-    , newEmail : String
-    , emailError : Maybe String
-    , emailSaved : Bool
     }
 
 
@@ -73,14 +60,6 @@ type Msg
     | GotRecoverResponse (Result String ())
     | RecoveryCodeVerifyClicked
     | GotRecoveryVerifyResponse (Result Http.Error Session)
-    | NewPasswordChanged String
-    | NewPasswordConfirmChanged String
-    | ChangePasswordClicked String
-    | GotUpdatePasswordResponse (Result String ())
-    | NewEmailChanged String
-    | ChangeEmailClicked String
-    | GotUpdateEmailResponse (Result String ())
-    | LogoutClicked
 
 
 init : Model
@@ -92,13 +71,6 @@ init =
     , stage = EnteringCredentials
     , mode = Login
     , error = Nothing
-    , newPassword = ""
-    , newPasswordConfirm = ""
-    , passwordError = Nothing
-    , passwordSaved = False
-    , newEmail = ""
-    , emailError = Nothing
-    , emailSaved = False
     }
 
 
@@ -215,51 +187,6 @@ update msg model =
 
         GotRecoveryVerifyResponse (Err _) ->
             ( { model | error = Just "Invalid or expired code" }, Cmd.none, NoSessionChange )
-
-        NewPasswordChanged newPassword ->
-            ( { model | newPassword = newPassword, passwordSaved = False }, Cmd.none, NoSessionChange )
-
-        NewPasswordConfirmChanged newPasswordConfirm ->
-            ( { model | newPasswordConfirm = newPasswordConfirm, passwordSaved = False }, Cmd.none, NoSessionChange )
-
-        ChangePasswordClicked accessToken ->
-            if model.newPassword /= model.newPasswordConfirm then
-                ( { model | passwordError = Just "Passwords do not match" }, Cmd.none, NoSessionChange )
-
-            else
-                ( { model | passwordError = Nothing }
-                , updatePassword accessToken model.newPassword
-                , NoSessionChange
-                )
-
-        GotUpdatePasswordResponse (Ok _) ->
-            ( { model
-                | passwordError = Nothing
-                , passwordSaved = True
-                , newPassword = ""
-                , newPasswordConfirm = ""
-              }
-            , Cmd.none
-            , NoSessionChange
-            )
-
-        GotUpdatePasswordResponse (Err message) ->
-            ( { model | passwordError = Just message, passwordSaved = False }, Cmd.none, NoSessionChange )
-
-        NewEmailChanged newEmail ->
-            ( { model | newEmail = newEmail, emailSaved = False }, Cmd.none, NoSessionChange )
-
-        ChangeEmailClicked accessToken ->
-            ( { model | emailError = Nothing }, updateEmail accessToken model.newEmail, NoSessionChange )
-
-        GotUpdateEmailResponse (Ok _) ->
-            ( { model | emailError = Nothing, emailSaved = True, newEmail = "" }, Cmd.none, NoSessionChange )
-
-        GotUpdateEmailResponse (Err message) ->
-            ( { model | emailError = Just message, emailSaved = False }, Cmd.none, NoSessionChange )
-
-        LogoutClicked ->
-            ( init, Cmd.none, SessionCleared )
 
 
 authRequest : { method : String, path : String, accessToken : Maybe String, body : Encode.Value, expect : Http.Expect msg } -> Cmd msg
@@ -461,132 +388,23 @@ verifyRecovery email code =
         }
 
 
-updatePassword : String -> String -> Cmd Msg
-updatePassword accessToken newPassword =
-    authRequest
-        { method = "PUT"
-        , path = "/user"
-        , accessToken = Just accessToken
-        , body = Encode.object [ ( "password", Encode.string newPassword ) ]
-        , expect = Http.expectStringResponse GotUpdatePasswordResponse handleUnitResponse
-        }
+view : Model -> Html Msg
+view model =
+    div [ class "auth" ]
+        [ case model.stage of
+            EnteringCredentials ->
+                case model.mode of
+                    ForgotPassword ->
+                        forgotPasswordForm model
 
+                    _ ->
+                        authForm model
 
-updateEmail : String -> String -> Cmd Msg
-updateEmail accessToken newEmail =
-    authRequest
-        { method = "PUT"
-        , path = "/user"
-        , accessToken = Just accessToken
-        , body = Encode.object [ ( "email", Encode.string newEmail ) ]
-        , expect = Http.expectStringResponse GotUpdateEmailResponse handleUnitResponse
-        }
+            AwaitingVerification ->
+                verifyForm model
 
-
-view : Maybe Session -> Model -> Html Msg
-view maybeSession model =
-    case maybeSession of
-        Just session ->
-            div [ class "account-page" ]
-                [ accountSection "Account"
-                    [ div [ class "account-logged-in" ]
-                        [ span [ class "account-muted" ] [ text session.email ]
-                        , button [ class "button-ghost", onClick LogoutClicked ] [ text "Log out" ]
-                        ]
-                    ]
-                , accountSection "Email" [ changeEmailForm session model ]
-                , accountSection "Password" [ changePasswordForm session model ]
-                ]
-
-        Nothing ->
-            div [ class "auth" ]
-                [ case model.stage of
-                    EnteringCredentials ->
-                        case model.mode of
-                            ForgotPassword ->
-                                forgotPasswordForm model
-
-                            _ ->
-                                authForm model
-
-                    AwaitingVerification ->
-                        verifyForm model
-
-                    AwaitingRecoveryCode ->
-                        recoveryCodeForm model
-                ]
-
-
-accountSection : String -> List (Html Msg) -> Html Msg
-accountSection title fields =
-    div [ class "settings-section" ]
-        [ h3 [ class "history-heading" ] [ text title ]
-        , div [ class "settings-fields" ] fields
-        ]
-
-
-changeEmailForm : Session -> Model -> Html Msg
-changeEmailForm session model =
-    div [ class "settings-field" ]
-        [ form
-            [ class "settings-inline-field"
-            , onSubmit (ChangeEmailClicked session.accessToken)
-            ]
-            [ input
-                [ class "auth-input"
-                , type_ "email"
-                , placeholder "New email"
-                , value model.newEmail
-                , onInput NewEmailChanged
-                , required True
-                ]
-                []
-            , button [ class "button-primary", type_ "submit" ] [ text "Update" ]
-            ]
-        , errorMessage "account-error" model.emailError
-        , if model.emailSaved then
-            p [ class "account-hint" ] [ text "Check your new email to confirm the change" ]
-
-          else
-            text ""
-        ]
-
-
-changePasswordForm : Session -> Model -> Html Msg
-changePasswordForm session model =
-    div [ class "settings-field" ]
-        [ form
-            [ class "settings-inline-field"
-            , onSubmit (ChangePasswordClicked session.accessToken)
-            ]
-            [ div [ class "settings-inline-field-inputs" ]
-                [ input
-                    [ class "auth-input"
-                    , type_ "password"
-                    , placeholder "New password"
-                    , value model.newPassword
-                    , onInput NewPasswordChanged
-                    , required True
-                    ]
-                    []
-                , input
-                    [ class "auth-input"
-                    , type_ "password"
-                    , placeholder "Confirm new password"
-                    , value model.newPasswordConfirm
-                    , onInput NewPasswordConfirmChanged
-                    , required True
-                    ]
-                    []
-                ]
-            , button [ class "button-primary", type_ "submit" ] [ text "Update" ]
-            ]
-        , errorMessage "account-error" model.passwordError
-        , if model.passwordSaved then
-            p [ class "account-hint" ] [ text "Password updated" ]
-
-          else
-            text ""
+            AwaitingRecoveryCode ->
+                recoveryCodeForm model
         ]
 
 
@@ -737,7 +555,7 @@ verifyForm model =
         ]
 
 
-errorMessage : String -> Maybe String -> Html Msg
+errorMessage : String -> Maybe String -> Html msg
 errorMessage className error =
     case error of
         Just err ->

@@ -21,16 +21,18 @@ import Pages.Stats as Stats
 import Sea.FSRS exposing (Rating(..))
 import Sea.Sea as Sea
 import Svg.Attributes exposing (height, width)
-import Sync.Account as Account
+import Sync.AccountSettings as AccountSettings
+import Sync.Auth as Auth
 import Sync.LocalOps as LocalOps
-import Sync.Session as Session exposing (Session)
+import Sync.Session as Session exposing (Session, SessionUpdate(..))
 import Sync.SessionLifecycle as SessionLifecycle
 import Task
 import Time
 
 
 type alias Model =
-    { account : Account.Model
+    { auth : Auth.Model
+    , accountSettings : AccountSettings.Model
     , session : Maybe Session
     , localOps : LocalOps.Model
     , add : Add.Model
@@ -43,7 +45,8 @@ type alias Model =
 
 
 type Msg
-    = AccountMsg Account.Msg
+    = AuthMsg Auth.Msg
+    | AccountSettingsMsg AccountSettings.Msg
     | StoreLoaded String Decode.Value
     | LocalOpsMsg LocalOps.Msg
     | AddMsg Add.Msg
@@ -78,7 +81,8 @@ main =
                     ( statsModel, statsCmd ) =
                         Stats.init
                 in
-                ( { account = Account.init
+                ( { auth = Auth.init
+                  , accountSettings = AccountSettings.init
                   , session = Nothing
                   , localOps = localOpsModel
                   , add = Add.init (Settings.typstPreamble Settings.default) (OpsLog.latestImages localOpsModel)
@@ -235,7 +239,7 @@ applySyncStatus status model =
             ( { model | syncError = Just "Reconnecting..." }
             , case model.session of
                 Just session ->
-                    Cmd.map AccountMsg (Account.refresh session.refreshToken)
+                    Cmd.map AuthMsg (Auth.refresh session.refreshToken)
 
                 Nothing ->
                     Cmd.none
@@ -248,24 +252,44 @@ applySyncStatus status model =
 updateInner : Msg -> Model -> ( Model, Cmd Msg )
 updateInner msg model =
     case msg of
-        AccountMsg accountMsg ->
+        AuthMsg authMsg ->
             let
-                ( accountModel, cmd, sessionUpdate ) =
-                    Account.update accountMsg model.account
+                ( authModel, cmd, sessionUpdate ) =
+                    Auth.update authMsg model.auth
 
                 ( updatedModel, localOpsCmd ) =
-                    SessionLifecycle.apply sessionUpdate { model | account = accountModel }
+                    SessionLifecycle.apply sessionUpdate { model | auth = authModel }
 
                 ( finalModel, resetCmd ) =
                     case sessionUpdate of
-                        Account.SessionCleared ->
+                        SessionCleared ->
                             resetAfterLogout updatedModel
 
                         _ ->
                             ( updatedModel, Cmd.none )
             in
             ( finalModel
-            , Cmd.batch [ Cmd.map AccountMsg cmd, Cmd.map LocalOpsMsg localOpsCmd, resetCmd ]
+            , Cmd.batch [ Cmd.map AuthMsg cmd, Cmd.map LocalOpsMsg localOpsCmd, resetCmd ]
+            )
+
+        AccountSettingsMsg accountSettingsMsg ->
+            let
+                ( accountSettingsModel, cmd, sessionUpdate ) =
+                    AccountSettings.update accountSettingsMsg model.accountSettings
+
+                ( updatedModel, localOpsCmd ) =
+                    SessionLifecycle.apply sessionUpdate { model | accountSettings = accountSettingsModel }
+
+                ( finalModel, resetCmd ) =
+                    case sessionUpdate of
+                        SessionCleared ->
+                            resetAfterLogout updatedModel
+
+                        _ ->
+                            ( updatedModel, Cmd.none )
+            in
+            ( finalModel
+            , Cmd.batch [ Cmd.map AccountSettingsMsg cmd, Cmd.map LocalOpsMsg localOpsCmd, resetCmd ]
             )
 
         StoreLoaded loadedKey value ->
@@ -273,12 +297,12 @@ updateInner msg model =
                 Just session ->
                     let
                         ( updatedModel, localOpsCmd ) =
-                            SessionLifecycle.apply (Account.SessionEstablished session) model
+                            SessionLifecycle.apply (SessionEstablished session) model
                     in
                     ( updatedModel
                     , Cmd.batch
                         [ Cmd.map LocalOpsMsg localOpsCmd
-                        , Cmd.map AccountMsg (Account.refresh session.refreshToken)
+                        , Cmd.map AuthMsg (Auth.refresh session.refreshToken)
                         ]
                     )
 
@@ -756,7 +780,12 @@ pageContent model =
             div [ class "stats-card" ] [ Html.map StatsMsg (Stats.view model.stats) ]
 
         Page.Account ->
-            Html.map AccountMsg (Account.view model.session model.account)
+            case model.session of
+                Just session ->
+                    Html.map AccountSettingsMsg (AccountSettings.view session model.accountSettings)
+
+                Nothing ->
+                    Html.map AuthMsg (Auth.view model.auth)
 
         Page.Settings ->
             settingsView model
