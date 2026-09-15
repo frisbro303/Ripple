@@ -45,8 +45,6 @@ Ripple has no deck browser and no separate edit mode — you review and edit in 
 - **i** / **o** — edit the front / back of the current card (o only once revealed)
 - The **⋯** menu on a card lets you push it back to learning, defer it, or delete it
 
-Cards are pulled from what's due, oldest first, capped at your daily new-card limit (see Settings). There's no deck to browse or manage — if it's due, it shows up.
-
 ### Adding cards
 
 Press **⌘1** (or click **+**) to add a card. Type Typst source for the front, press **Shift+Enter** to jump to the back, **Shift+Enter** again to submit. Both fields render a live preview as you type.
