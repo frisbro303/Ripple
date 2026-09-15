@@ -3,7 +3,6 @@ module Main exposing (main)
 import Browser
 import Browser.Events
 import Data
-import Dict exposing (Dict)
 import Html exposing (Html, a, button, div, h3, span, text)
 import Html.Attributes exposing (attribute, class, classList, href, rel, target)
 import Html.Events exposing (onClick)
@@ -82,7 +81,7 @@ main =
                 ( { account = Account.init
                   , session = Nothing
                   , localOps = localOpsModel
-                  , add = Add.init (Settings.typstPreamble Settings.default) (latestImages localOpsModel)
+                  , add = Add.init (Settings.typstPreamble Settings.default) (OpsLog.latestImages localOpsModel)
                   , review = Review.init
                   , stats = statsModel
                   , settings = Settings.default
@@ -108,14 +107,32 @@ update msg model =
     let
         ( newModel, cmd ) =
             updateInner msg model
-
-        ( preambleModel, preambleCmd ) =
-            syncPreambleFromOps newModel
-
-        ( syncedModel, retentionCmd ) =
-            syncRetentionFromOps preambleModel
     in
-    ( syncedModel, Cmd.batch [ cmd, preambleCmd, retentionCmd ] )
+    if opsLogMayHaveChangedExternally msg then
+        let
+            ( preambleModel, preambleCmd ) =
+                syncPreambleFromOps newModel
+
+            ( syncedModel, retentionCmd ) =
+                syncRetentionFromOps preambleModel
+        in
+        ( syncedModel, Cmd.batch [ cmd, preambleCmd, retentionCmd ] )
+
+    else
+        ( newModel, cmd )
+
+
+opsLogMayHaveChangedExternally : Msg -> Bool
+opsLogMayHaveChangedExternally msg =
+    case msg of
+        LocalOpsMsg _ ->
+            True
+
+        GotImportedJson _ ->
+            True
+
+        _ ->
+            False
 
 
 latestOpValue : (Op.OpKind -> Maybe a) -> OpsLog -> Maybe a
@@ -167,21 +184,6 @@ latestRetention =
                 _ ->
                     Nothing
         )
-
-
-latestImages : OpsLog -> Dict String String
-latestImages opsLog =
-    OpsLog.foldl
-        (\op acc ->
-            case op.opKind of
-                Op.AddImage { id, data } ->
-                    Dict.insert id data acc
-
-                _ ->
-                    acc
-        )
-        Dict.empty
-        opsLog
 
 
 syncPreambleFromOps : Model -> ( Model, Cmd Msg )
@@ -253,9 +255,17 @@ updateInner msg model =
 
                 ( updatedModel, localOpsCmd ) =
                     SessionLifecycle.apply sessionUpdate { model | account = accountModel }
+
+                ( finalModel, resetCmd ) =
+                    case sessionUpdate of
+                        Account.SessionCleared ->
+                            resetAfterLogout updatedModel
+
+                        _ ->
+                            ( updatedModel, Cmd.none )
             in
-            ( updatedModel
-            , Cmd.batch [ Cmd.map AccountMsg cmd, Cmd.map LocalOpsMsg localOpsCmd ]
+            ( finalModel
+            , Cmd.batch [ Cmd.map AccountMsg cmd, Cmd.map LocalOpsMsg localOpsCmd, resetCmd ]
             )
 
         StoreLoaded loadedKey value ->
@@ -442,11 +452,8 @@ handleAddMsg addMsg model =
 handleReviewMsg : Review.Msg -> Model -> ( Model, Cmd Msg )
 handleReviewMsg reviewMsg model =
     let
-        sea =
-            Sea.fromOpsLog (Settings.desiredRetention model.settings) model.localOps
-
         ( reviewModel, reviewCmd, outMsg ) =
-            Review.update (Settings.typstPreamble model.settings) (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) (latestImages model.localOps) model.localOps sea reviewMsg model.review
+            Review.update (Settings.typstPreamble model.settings) (Settings.dailyNewLimit model.settings) (Settings.deferDays model.settings) (Settings.desiredRetention model.settings) model.localOps reviewMsg model.review
 
         ( afterOutModel, outCmd ) =
             case outMsg of
@@ -493,7 +500,7 @@ togglePage page model =
 
         newAdd =
             if togglingOff && model.page == Page.Add then
-                Add.init (Settings.typstPreamble model.settings) (latestImages model.localOps)
+                Add.init (Settings.typstPreamble model.settings) (OpsLog.latestImages model.localOps)
 
             else
                 model.add
@@ -522,6 +529,17 @@ pickIfIdle reviewModel =
 
     else
         Cmd.none
+
+
+resetAfterLogout : Model -> ( Model, Cmd Msg )
+resetAfterLogout model =
+    let
+        ( statsModel, statsCmd ) =
+            Stats.init
+    in
+    ( { model | review = Review.init, stats = statsModel }
+    , Cmd.batch [ Cmd.map ReviewMsg Review.requestPick, Cmd.map StatsMsg statsCmd ]
+    )
 
 
 handleKeyPressed : KeyEvent -> Model -> ( Model, Cmd Msg )

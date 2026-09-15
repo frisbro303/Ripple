@@ -97,10 +97,6 @@ export function setupTauri(app) {
     el.setSelectionRange(cursorStart, cursorEnd);
   });
 
-  app.ports.alert.subscribe((message) => {
-    alert(message);
-  });
-
   window.addEventListener("blur", () => {
     app.ports.windowFocusChanged.send(false);
   });
@@ -151,7 +147,7 @@ export function setupTauri(app) {
     const blob = new Blob([json], { type: "application/json" });
 
     const isTouch = window.matchMedia("(pointer: coarse)").matches;
-    const file = new File([blob], "tide-backup.json", { type: "application/json" });
+    const file = new File([blob], "ripple-backup.json", { type: "application/json" });
 
     if (isTouch && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
@@ -163,7 +159,7 @@ export function setupTauri(app) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "tide-backup.json";
+    a.download = "ripple-backup.json";
     a.click();
     URL.revokeObjectURL(url);
   });

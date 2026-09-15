@@ -1,6 +1,5 @@
 port module Typst.Port exposing
-    ( alert
-    , applyEdit
+    ( applyEdit
     , blurField
     , compileTypst
     , focusField
@@ -19,9 +18,6 @@ port focusField : String -> Cmd msg
 
 
 port blurField : String -> Cmd msg
-
-
-port alert : String -> Cmd msg
 
 
 port windowFocusChanged : (Bool -> msg) -> Sub msg

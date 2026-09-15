@@ -36,7 +36,14 @@ async function dispatchImageData(el, file) {
   try {
     const base64 = await blobToPngBase64(file);
     el.dispatchEvent(new CustomEvent("typst-image-data", { detail: { data: base64 }, bubbles: true }));
-  } catch (err) {}
+  } catch (err) {
+    el.dispatchEvent(
+      new CustomEvent("typst-image-error", {
+        detail: { message: "Could not read that image. Try a different file." },
+        bubbles: true,
+      })
+    );
+  }
 }
 
 function imageFileFromClipboard(clipboardData) {

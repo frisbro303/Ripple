@@ -9,7 +9,17 @@ name: Release macOS
 #   APPLE_TEAM_ID                  - Developer team ID (U9379CAYS9)
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -55,9 +65,25 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri build
 
+      - name: Determine release tag
+        id: release
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: Ripple-macOS
           path: |
             src-tauri/target/release/bundle/macos/*.app
             src-tauri/target/release/bundle/dmg/*.dmg
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: Ripple ${{ steps.release.outputs.tag }}
+          generate_release_notes: true
+          files: src-tauri/target/release/bundle/dmg/*.dmg

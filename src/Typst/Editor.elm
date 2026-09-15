@@ -37,6 +37,8 @@ type alias Model =
     , highlightTree : Maybe Highlight.Node
     , knownImages : Dict String String
     , pendingImages : Dict String String
+    , requestSeq : Int
+    , imageError : Maybe String
     }
 
 
@@ -59,6 +61,8 @@ init id fieldPlaceholder shortcutHint chainable preamble knownImages =
     , highlightTree = Nothing
     , knownImages = knownImages
     , pendingImages = Dict.empty
+    , requestSeq = 0
+    , imageError = Nothing
     }
 
 
@@ -81,16 +85,31 @@ initWithSource id fieldPlaceholder shortcutHint chainable preamble knownImages e
       , highlightTree = Nothing
       , knownImages = knownImages
       , pendingImages = Dict.empty
+      , requestSeq = 0
+      , imageError = Nothing
       }
     , if String.trim existingSource == "" then
         Cmd.none
 
       else
         Cmd.batch
-            [ Port.compileTypst id preamble existingSource (Images.attachments knownImages Dict.empty existingSource)
-            , Port.highlightTypst id existingSource
+            [ Port.compileTypst (requestId id 0) preamble existingSource (Images.attachments knownImages Dict.empty existingSource)
+            , Port.highlightTypst (requestId id 0) existingSource
             ]
     )
+
+
+requestId : String -> Int -> String
+requestId id seq =
+    id ++ "#" ++ String.fromInt seq
+
+
+findImageId : String -> Dict String String -> Maybe String
+findImageId data images =
+    Dict.toList images
+        |> List.filter (\( _, v ) -> v == data)
+        |> List.head
+        |> Maybe.map Tuple.first
 
 
 isEditing : Model -> Bool
@@ -117,6 +136,7 @@ type Msg
     | FocusRequested
     | DraftChanged String
     | ImageDataReceived { data : String, start : Int, end : Int }
+    | ImageErrorReceived String
     | GotTimeForImageInsert { data : String, start : Int, end : Int } Time.Posix
     | GotDraftResult String (Result String String)
     | GotHighlightTree String Decode.Value
@@ -181,30 +201,48 @@ update msg model =
             )
 
         DraftChanged newSource ->
-            ( { model | draftSource = newSource }
+            let
+                newModel =
+                    { model | draftSource = newSource, requestSeq = model.requestSeq + 1, imageError = Nothing }
+
+                reqId =
+                    requestId newModel.id newModel.requestSeq
+            in
+            ( newModel
             , Cmd.batch
-                [ Port.compileTypst model.id model.preamble newSource (Images.attachments model.knownImages model.pendingImages newSource)
-                , Port.highlightTypst model.id newSource
+                [ Port.compileTypst reqId newModel.preamble newSource (Images.attachments newModel.knownImages newModel.pendingImages newSource)
+                , Port.highlightTypst reqId newSource
                 ]
             , NoOutMsg
             )
 
         ImageDataReceived imageData ->
             if Images.isTooLarge imageData.data then
-                ( model
-                , Port.alert "That image is too large to add to a card (limit ~1.5MB). Try a smaller image or a screenshot of just the relevant part."
+                ( { model | imageError = Just "That image is too large to add to a card (limit ~1.5MB). Try a smaller image or a screenshot of just the relevant part." }
+                , Cmd.none
                 , NoOutMsg
                 )
 
             else
-                ( model, Task.perform (GotTimeForImageInsert imageData) Time.now, NoOutMsg )
+                ( { model | imageError = Nothing }, Task.perform (GotTimeForImageInsert imageData) Time.now, NoOutMsg )
+
+        ImageErrorReceived message ->
+            ( { model | imageError = Just message }, Cmd.none, NoOutMsg )
 
         GotTimeForImageInsert { data, start, end } now ->
             let
+                existingId =
+                    findImageId data (Dict.union model.pendingImages model.knownImages)
+
                 imgId =
-                    Random.step UUID.generator (Random.initialSeed (Time.posixToMillis now))
-                        |> Tuple.first
-                        |> UUID.toString
+                    case existingId of
+                        Just id ->
+                            id
+
+                        Nothing ->
+                            Random.step UUID.generator (Random.initialSeed (Time.posixToMillis now))
+                                |> Tuple.first
+                                |> UUID.toString
 
                 reference =
                     "#image(\"" ++ imgId ++ ".png\", width: 100%)"
@@ -216,19 +254,37 @@ update msg model =
                     start + String.length reference
 
                 newModel =
-                    { model | draftSource = newValue, pendingImages = Dict.insert imgId data model.pendingImages }
+                    { model
+                        | draftSource = newValue
+                        , pendingImages =
+                            case existingId of
+                                Just _ ->
+                                    model.pendingImages
+
+                                Nothing ->
+                                    Dict.insert imgId data model.pendingImages
+                        , requestSeq = model.requestSeq + 1
+                    }
+
+                reqId =
+                    requestId newModel.id newModel.requestSeq
             in
             ( newModel
             , Cmd.batch
-                [ Port.compileTypst newModel.id newModel.preamble newValue (Images.attachments newModel.knownImages newModel.pendingImages newValue)
-                , Port.highlightTypst newModel.id newValue
+                [ Port.compileTypst reqId newModel.preamble newValue (Images.attachments newModel.knownImages newModel.pendingImages newValue)
+                , Port.highlightTypst reqId newValue
                 , Port.setSelection (textareaId newModel) newPos newPos
                 ]
-            , ImageAdded imgId data
+            , case existingId of
+                Just _ ->
+                    NoOutMsg
+
+                Nothing ->
+                    ImageAdded imgId data
             )
 
-        GotDraftResult requestId result ->
-            if requestId /= model.id then
+        GotDraftResult incomingRequestId result ->
+            if incomingRequestId /= requestId model.id model.requestSeq then
                 ( model, Cmd.none, NoOutMsg )
 
             else if isEditing model then
@@ -237,8 +293,8 @@ update msg model =
             else
                 ( { model | committedResult = result }, Cmd.none, NoOutMsg )
 
-        GotHighlightTree requestId value ->
-            if requestId /= model.id then
+        GotHighlightTree incomingRequestId value ->
+            if incomingRequestId /= requestId model.id model.requestSeq then
                 ( model, Cmd.none, NoOutMsg )
 
             else
@@ -318,8 +374,12 @@ update msg model =
                 ( model, Cmd.none, NoOutMsg )
 
             else
-                ( model
-                , Port.compileTypst model.id model.preamble source (Images.attachments model.knownImages model.pendingImages source)
+                let
+                    newModel =
+                        { model | requestSeq = model.requestSeq + 1 }
+                in
+                ( newModel
+                , Port.compileTypst (requestId newModel.id newModel.requestSeq) newModel.preamble source (Images.attachments newModel.knownImages newModel.pendingImages source)
                 , NoOutMsg
                 )
 
@@ -374,6 +434,11 @@ imageDataDecoder =
         (Decode.at [ "target", "selectionEnd" ] Decode.int)
 
 
+imageErrorDecoder : Decode.Decoder Msg
+imageErrorDecoder =
+    Decode.map ImageErrorReceived (Decode.at [ "detail", "message" ] Decode.string)
+
+
 nativeBlurDecoder : Decode.Decoder Msg
 nativeBlurDecoder =
     Decode.map NativeBlurred (Decode.at [ "detail", "windowHasFocus" ] Decode.bool)
@@ -418,6 +483,7 @@ view model =
                     , onFocus FocusRequested
                     , on "scroll" (Decode.map Scrolled (Decode.at [ "target", "scrollTop" ] Decode.float))
                     , on "typst-image-data" imageDataDecoder
+                    , on "typst-image-error" imageErrorDecoder
                     , Keymap.onKeyDown model.chainable KeyOutcome
                     ]
                     []
@@ -433,6 +499,13 @@ view model =
 
                     else
                         [ div [ class "note-editor-preview" ] [ previewView model.draftResult ] ]
+                   )
+                ++ (case model.imageError of
+                        Just message ->
+                            [ div [ class "note-editor-error" ] [ text message ] ]
+
+                        Nothing ->
+                            []
                    )
             )
         , div [ class "editor-preview-layer" ]

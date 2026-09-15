@@ -23,6 +23,7 @@ type alias Model =
     , typstPreamble : String
     , theme : Theme
     , highlightTree : Maybe Highlight.Node
+    , highlightSeq : Int
     , fieldHeight : Float
     , drag : Maybe Drag
     , scrollTop : Float
@@ -61,6 +62,7 @@ default =
     , typstPreamble = ""
     , theme = Theme.System
     , highlightTree = Nothing
+    , highlightSeq = 0
     , fieldHeight = defaultFieldHeight
     , drag = Nothing
     , scrollTop = 0
@@ -153,7 +155,7 @@ decodeFromStore loadedKey val =
                     in
                     ( model
                     , Cmd.batch
-                        [ Port.highlightTypst preambleFieldId model.typstPreamble
+                        [ Port.highlightTypst (preambleRequestId model.highlightSeq) model.typstPreamble
                         , Theme.setTheme model.theme
                         ]
                     )
@@ -176,6 +178,11 @@ save model =
 preambleFieldId : String
 preambleFieldId =
     "settings-preamble"
+
+
+preambleRequestId : Int -> String
+preambleRequestId seq =
+    preambleFieldId ++ "#" ++ String.fromInt seq
 
 
 type Msg
@@ -258,7 +265,11 @@ update msg model =
             ( newModel, Cmd.batch [ save newModel, Theme.setTheme newModel.theme ], NoSyncUpdate )
 
         PreambleChanged text_ ->
-            ( { model | typstPreamble = text_ }, Port.highlightTypst preambleFieldId text_, NoSyncUpdate )
+            let
+                newModel =
+                    { model | typstPreamble = text_, highlightSeq = model.highlightSeq + 1 }
+            in
+            ( newModel, Port.highlightTypst (preambleRequestId newModel.highlightSeq) text_, NoSyncUpdate )
 
         PreambleBlurred ->
             ( model, save model, PreambleCommitted model.typstPreamble )
@@ -278,7 +289,7 @@ update msg model =
                     ( model, Port.applyEdit preambleFieldId edit, NoSyncUpdate )
 
         GotHighlightTree requestId value ->
-            if requestId /= preambleFieldId then
+            if requestId /= preambleRequestId model.highlightSeq then
                 ( model, Cmd.none, NoSyncUpdate )
 
             else
@@ -312,9 +323,9 @@ applySyncedPreamble : String -> Model -> ( Model, Cmd Msg )
 applySyncedPreamble preamble model =
     let
         newModel =
-            { model | typstPreamble = preamble }
+            { model | typstPreamble = preamble, highlightSeq = model.highlightSeq + 1 }
     in
-    ( newModel, Cmd.batch [ save newModel, Port.highlightTypst preambleFieldId preamble ] )
+    ( newModel, Cmd.batch [ save newModel, Port.highlightTypst (preambleRequestId newModel.highlightSeq) preamble ] )
 
 
 applySyncedRetention : Int -> Model -> ( Model, Cmd Msg )

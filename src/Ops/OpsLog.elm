@@ -1,7 +1,7 @@
-module Ops.OpsLog exposing (OpsLog, diff, emptyOpsLog, foldl, fromList, idStrings, insert, maxTimestamp, merge, toList)
+module Ops.OpsLog exposing (OpsLog, diff, emptyOpsLog, foldl, fromList, idStrings, insert, latestImages, maxTimestamp, merge, toList)
 
 import Dict exposing (Dict)
-import Ops.Op exposing (Op, OpId(..))
+import Ops.Op exposing (Op, OpId(..), OpKind(..))
 import Set exposing (Set)
 import Time
 import UUID
@@ -75,3 +75,18 @@ idStrings (OpsLog dict) =
                 UUID.toString uuid
             )
         |> Set.fromList
+
+
+latestImages : OpsLog -> Dict String String
+latestImages opsLog =
+    foldl
+        (\op acc ->
+            case op.opKind of
+                AddImage { id, data } ->
+                    Dict.insert id data acc
+
+                _ ->
+                    acc
+        )
+        Dict.empty
+        opsLog

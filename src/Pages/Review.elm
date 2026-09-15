@@ -1,14 +1,13 @@
 module Pages.Review exposing (Model, Msg, OutMsg(..), editBack, editFront, init, isIdle, isRevealed, rate, requestPick, reveal, subscriptions, themeChanged, update, view, viewActions)
 
-import Dict exposing (Dict)
 import Html exposing (Html, button, div, hr, p, span, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Ops.Op as Op exposing (Op, OpKind(..))
-import Ops.OpsLog exposing (OpsLog)
+import Ops.OpsLog as OpsLog exposing (OpsLog)
 import Sea.Card as Card
 import Sea.FSRS exposing (Rating(..))
-import Sea.Sea as Sea exposing (Sea)
+import Sea.Sea as Sea
 import Task
 import Time
 import Typst.Editor as Editor
@@ -113,16 +112,23 @@ type OutMsg
     | ImagePersisted Op
 
 
-update : String -> Int -> Int -> Dict String String -> OpsLog -> Sea -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update preamble dailyNewLimit deferDays knownImages opsLog sea msg model =
+update : String -> Int -> Int -> Float -> OpsLog -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+update preamble dailyNewLimit deferDays desiredRetention opsLog msg model =
     case msg of
         GotTimeForPick now ->
+            let
+                sea =
+                    Sea.fromOpsLog desiredRetention opsLog
+            in
             case Sea.nextDue dailyNewLimit now opsLog sea of
                 Nothing ->
                     ( Empty, Cmd.none, NoOutMsg )
 
                 Just card ->
                     let
+                        knownImages =
+                            OpsLog.latestImages opsLog
+
                         ( frontModel, frontCmd ) =
                             Editor.initWithSource "review-front" "Front" "i" False preamble knownImages card.front
 
